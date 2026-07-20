@@ -5,7 +5,7 @@ FastAPI backend for [FinTrack](https://github.com/Akasht3010/fintrack) — a uni
 ## Tech stack
 
 - **FastAPI** + **Uvicorn** — API server
-- **SQLAlchemy** — ORM (SQLite locally, Postgres-ready via `psycopg2`)
+- **PostgreSQL** + **SQLAlchemy** — database / ORM
 - **Pydantic v2** — request/response validation
 - **Celery** + **Redis** — background jobs (wired in, not yet used)
 - **google-api-python-client** — Gmail OAuth + email ingestion
@@ -13,16 +13,25 @@ FastAPI backend for [FinTrack](https://github.com/Akasht3010/fintrack) — a uni
 ## Getting started
 
 ```bash
+# 1. Start Postgres (local dev instance, via Docker)
+docker compose up -d
+
+# 2. Python env
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env   # fill in SECRET_KEY, Google OAuth creds, etc.
+                        # DATABASE_URL already matches the docker-compose defaults
 
 python run.py
 ```
 
+Tables are created automatically on startup (`Base.metadata.create_all`) — no separate migration step needed yet.
+
 The API runs at `http://localhost:8000` (also reachable on your LAN IP, useful for testing from a physical device). Interactive docs live at `/docs`.
+
+To connect to the local DB directly: `docker exec -it fintrack-backend-db-1 psql -U fintrack -d fintrack`
 
 ## Project structure
 
@@ -66,6 +75,6 @@ Auth is JWT-based (`HS256`, set `SECRET_KEY` in `.env`). There's no session/cook
 
 ## Notes
 
-- `fintrack.db` (SQLite) is local dev data and is gitignored — each environment gets its own.
+- Postgres data lives in a named Docker volume (`fintrack_pgdata`), not in the repo — each environment gets its own local database.
 - Google OAuth credentials in `.env` are currently placeholders; the Gmail sync flow needs real credentials to test end-to-end.
 - Next planned step: Google OAuth login on the frontend, replacing/augmenting phone+email auth.
