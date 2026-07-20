@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+*.egg-info/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Database (local dev data)
+*.db
+*.db.bak-*
+*.sqlite3
+
+# macOS
+.DS_Store
+
+# Tooling
+.pytest_cache/
+.vscode/
