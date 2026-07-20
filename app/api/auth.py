@@ -2,17 +2,24 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.schemas.user import UserCreate, UserResponse
-from app.services.user_service import UserService, DuplicateUserError
+from app.services.user_service import UserService, DuplicateUserError, normalize_phone
 from app.utils.auth import create_access_token
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+from pydantic import BaseModel, EmailStr, field_validator
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 class SignupRequest(BaseModel):
     name: str
     email: EmailStr
-    phone: Optional[str] = None
+    phone: str
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        digits = normalize_phone(value)
+        if len(digits) != 10:
+            raise ValueError("Phone number must be 10 digits")
+        return digits
 
 class SignupResponse(BaseModel):
     access_token: str

@@ -42,13 +42,13 @@ class UserService:
     @staticmethod
     def create_user(db: Session, user_create: UserCreate) -> User:
         """Create a new user. Raises DuplicateUserError if the email or phone is already taken."""
-        phone = normalize_phone(user_create.phone) if user_create.phone else None
+        phone = normalize_phone(user_create.phone)
         email = user_create.email.lower()
 
         if UserService.get_user_by_email(db, email):
             raise DuplicateUserError("email")
 
-        if phone and UserService.get_user_by_phone(db, phone):
+        if UserService.get_user_by_phone(db, phone):
             raise DuplicateUserError("phone")
 
         db_user = User(
