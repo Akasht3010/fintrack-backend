@@ -9,6 +9,12 @@ def normalize_phone(phone: str) -> str:
     return re.sub(r"\D", "", phone or "")
 
 
+class DuplicateUserError(Exception):
+    """Raised on signup when the email or phone is already registered to another account."""
+    def __init__(self, field: str):
+        self.field = field  # "email" or "phone"
+
+
 class UserService:
     @staticmethod
     def get_user_by_email(db: Session, email: str) -> User:
@@ -35,28 +41,19 @@ class UserService:
 
     @staticmethod
     def create_user(db: Session, user_create: UserCreate) -> User:
+        """Create a new user. Raises DuplicateUserError if the email or phone is already taken."""
         phone = normalize_phone(user_create.phone) if user_create.phone else None
-        email = user_create.email.lower() if user_create.email else None
+        email = user_create.email.lower()
 
-        if not email and not phone:
-            raise ValueError("Either email or phone is required")
+        if UserService.get_user_by_email(db, email):
+            raise DuplicateUserError("email")
 
-        # Check for an existing account by phone first, then email,
-        # so the same person doesn't end up with duplicate accounts.
-        existing = None
-        if phone:
-            existing = UserService.get_user_by_phone(db, phone)
-        if not existing and email:
-            existing = UserService.get_user_by_email(db, email)
-        if existing:
-            return existing
-
-        if not email:
-            email = f"user_{phone}@fintrack.app"
+        if phone and UserService.get_user_by_phone(db, phone):
+            raise DuplicateUserError("phone")
 
         db_user = User(
             id=str(uuid.uuid4()),
-            name=user_create.name or "User",
+            name=user_create.name,
             email=email,
             phone=phone,
             gmail_connected=False

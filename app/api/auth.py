@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.schemas.user import UserCreate, UserResponse
-from app.services.user_service import UserService
+from app.services.user_service import UserService, DuplicateUserError
 from app.utils.auth import create_access_token
 from pydantic import BaseModel, EmailStr
 from typing import Optional
@@ -10,8 +10,8 @@ from typing import Optional
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 class SignupRequest(BaseModel):
-    name: Optional[str] = "User"
-    email: Optional[EmailStr] = None
+    name: str
+    email: EmailStr
     phone: Optional[str] = None
 
 class SignupResponse(BaseModel):
@@ -27,17 +27,22 @@ class LoginResponse(BaseModel):
 
 @router.post("/signup", response_model=SignupResponse)
 async def signup(request: SignupRequest, db: Session = Depends(get_db)):
-    """Create a new user account (idempotent: returns the existing account if this phone/email is already registered)"""
-    if not request.email and not request.phone:
-        raise HTTPException(status_code=400, detail="Email or phone is required")
-
+    """Create a new user account. Fails if the email or phone is already registered."""
     user_create = UserCreate(
-        name=request.name or "User",
+        name=request.name,
         email=request.email,
         phone=request.phone
     )
 
-    user = UserService.create_user(db, user_create)
+    try:
+        user = UserService.create_user(db, user_create)
+    except DuplicateUserError as e:
+        detail = (
+            "An account with this email already exists"
+            if e.field == "email"
+            else "An account with this phone number already exists"
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
     access_token = create_access_token(data={"sub": user.id})
 
