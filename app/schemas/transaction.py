@@ -21,7 +21,6 @@ class TransactionBase(BaseModel):
     is_recurring: bool = False
 
 class TransactionCreate(TransactionBase):
-    user_id: str
     raw_text: Optional[str] = None
 
 class TransactionResponse(TransactionBase):

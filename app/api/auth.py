@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.schemas.user import UserCreate, UserResponse
 from app.services.user_service import UserService, DuplicateUserError, normalize_phone
-from app.utils.auth import create_access_token
+from app.utils.auth import create_access_token, get_current_user
+from app.models.user import User
 from pydantic import BaseModel, EmailStr, field_validator
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -80,18 +81,12 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     }
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user(user_id: str, db: Session = Depends(get_db)):
-    """Get current authenticated user"""
-    user = UserService.get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    return user
+async def read_current_user(current_user: User = Depends(get_current_user)):
+    """Get the authenticated user (identified by the bearer token)"""
+    return current_user
 
 @router.post("/refresh")
-async def refresh_token(user_id: str):
-    """Refresh access token"""
-    access_token = create_access_token(data={"sub": user_id})
+async def refresh_token(current_user: User = Depends(get_current_user)):
+    """Issue a fresh access token for the authenticated user"""
+    access_token = create_access_token(data={"sub": current_user.id})
     return {"access_token": access_token}

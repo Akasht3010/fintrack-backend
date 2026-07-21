@@ -4,20 +4,20 @@ from sqlalchemy import desc
 from app.config.database import get_db
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionList
 from app.models.transaction import Transaction
-from pydantic import BaseModel
-from datetime import datetime
-from typing import Literal
+from app.models.user import User
+from app.utils.auth import get_current_user
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
 @router.post("", response_model=TransactionResponse)
 async def create_transaction(
     transaction: TransactionCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create a new transaction"""
+    """Create a new transaction for the authenticated user"""
     db_transaction = Transaction(
-        user_id=transaction.user_id,
+        user_id=current_user.id,
         amount=transaction.amount,
         currency=transaction.currency,
         type=transaction.type,
@@ -36,20 +36,20 @@ async def create_transaction(
 
 @router.get("", response_model=TransactionList)
 async def list_transactions(
-    user_id: str,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get user's transactions with pagination"""
-    query = db.query(Transaction).filter(Transaction.user_id == user_id)
-    
+    """Get the authenticated user's transactions with pagination"""
+    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+
     total = query.count()
-    
+
     transactions = query.order_by(desc(Transaction.date)).offset(
         (page - 1) * limit
     ).limit(limit).all()
-    
+
     return {
         "transactions": transactions,
         "total": total,
@@ -58,9 +58,16 @@ async def list_transactions(
     }
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
-async def get_transaction(transaction_id: str, db: Session = Depends(get_db)):
-    """Get a specific transaction"""
-    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+async def get_transaction(
+    transaction_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get a specific transaction owned by the authenticated user"""
+    transaction = db.query(Transaction).filter(
+        Transaction.id == transaction_id,
+        Transaction.user_id == current_user.id
+    ).first()
     if not transaction:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -69,9 +76,16 @@ async def get_transaction(transaction_id: str, db: Session = Depends(get_db)):
     return transaction
 
 @router.delete("/{transaction_id}")
-async def delete_transaction(transaction_id: str, db: Session = Depends(get_db)):
-    """Delete a transaction"""
-    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+async def delete_transaction(
+    transaction_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a transaction owned by the authenticated user"""
+    transaction = db.query(Transaction).filter(
+        Transaction.id == transaction_id,
+        Transaction.user_id == current_user.id
+    ).first()
     if not transaction:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

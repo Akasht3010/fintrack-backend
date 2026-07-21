@@ -11,6 +11,7 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     phone = Column(String, nullable=True)
     avatar = Column(String, nullable=True)
+    google_id = Column(String, unique=True, nullable=True)
     gmail_connected = Column(Boolean, default=False)
     gmail_refresh_token = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

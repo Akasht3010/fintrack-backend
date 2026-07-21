@@ -5,7 +5,7 @@ from app.config.database import Base, engine
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.models.budget import Budget
-from app.api import auth, transactions
+from app.api import auth, transactions, google_auth
 # from app.api import gmail  # TODO: Fix Gmail import
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(transactions.router)
+app.include_router(google_auth.router)
 # app.include_router(gmail.router)  # TODO: Enable once Gmail imports work
 
 @app.get("/health")
