@@ -1,122 +1,135 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import base64
+import json
+import os
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+from datetime import datetime
+from email.utils import parsedate_to_datetime
+
 from app.config.database import get_db
 from app.services.gmail_service import GmailService
 from app.services.user_service import UserService
-from pydantic import BaseModel
+from app.services.email_parser import parse_bank_email
+from app.models.user import User
 from app.models.transaction import Transaction
-import os
-from datetime import datetime
+from app.utils.auth import get_current_user, verify_token
 
 router = APIRouter(prefix="/api/gmail", tags=["gmail"])
 
-gmail_service = GmailService(credentials_json="credentials.json")
+gmail_service = GmailService()
 
-class GmailConnectRequest(BaseModel):
-    code: str
-    redirect_uri: str
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
+CALLBACK_PATH = "/api/gmail/callback"
 
-class GmailAuthUrl(BaseModel):
-    auth_url: str
-    state: str
 
-@router.get("/auth-url")
-async def get_gmail_auth_url(redirect_uri: str = Query(...)):
-    """Get Gmail OAuth URL"""
-    auth_url, state = gmail_service.get_auth_url(redirect_uri)
-    return {
-        "auth_url": auth_url,
-        "state": state
-    }
+def _encode_state(user_id: str, app_redirect_uri: str) -> str:
+    payload = json.dumps({"user_id": user_id, "app_redirect_uri": app_redirect_uri})
+    return base64.urlsafe_b64encode(payload.encode()).decode()
 
-@router.post("/connect")
-async def connect_gmail(
-    request: GmailConnectRequest,
-    user_id: str = Query(...),
-    db: Session = Depends(get_db)
-):
-    """Exchange auth code for refresh token and save to user"""
+
+def _decode_state(state: str) -> dict:
     try:
-        refresh_token, access_token = gmail_service.exchange_code_for_token(
-            request.code,
-            request.redirect_uri
-        )
-        
-        # Update user with refresh token
-        user = UserService.update_gmail_token(db, user_id, refresh_token)
-        
-        return {
-            "success": True,
-            "message": "Gmail connected successfully",
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "gmail_connected": user.gmail_connected
-            }
-        }
+        return json.loads(base64.urlsafe_b64decode(state.encode()).decode())
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid state")
+
+
+@router.get("/authorize")
+async def gmail_authorize(
+    token: str = Query(..., description="The user's own access token, so we know whose account to attach Gmail to"),
+    app_redirect_uri: str = Query(...)
+):
+    """Kick off Gmail's OAuth consent flow (readonly inbox access) for the current user."""
+    user_id = verify_token(token)
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    state = _encode_state(user_id, app_redirect_uri)
+    auth_url = gmail_service.get_auth_url(f"{PUBLIC_BASE_URL}{CALLBACK_PATH}", state)
+    return RedirectResponse(auth_url)
+
+
+@router.get("/callback")
+async def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
+    """Google redirects here after Gmail consent. Exchange the code, save the refresh token, bounce back to the app."""
+    decoded = _decode_state(state)
+    user_id = decoded["user_id"]
+    app_redirect_uri = decoded["app_redirect_uri"]
+
+    try:
+        refresh_token = gmail_service.exchange_code_for_token(code, f"{PUBLIC_BASE_URL}{CALLBACK_PATH}")
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to connect Gmail: {str(e)}"
-        )
+        separator = "&" if "?" in app_redirect_uri else "?"
+        return RedirectResponse(f"{app_redirect_uri}{separator}gmail_connected=false&error={str(e)}")
+
+    UserService.update_gmail_token(db, user_id, refresh_token)
+
+    separator = "&" if "?" in app_redirect_uri else "?"
+    return RedirectResponse(f"{app_redirect_uri}{separator}gmail_connected=true")
+
 
 @router.post("/sync")
 async def sync_gmail_emails(
-    user_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Fetch and parse bank emails from Gmail"""
-    user = UserService.get_user_by_id(db, user_id)
-    
-    if not user or not user.gmail_connected or not user.gmail_refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Gmail not connected"
-        )
-    
-    try:
-        # Fetch bank emails
-        emails = gmail_service.search_bank_emails(user.gmail_refresh_token)
-        
-        synced_count = 0
-        for email in emails:
-            # TODO: Parse email and create transaction
-            # For now, just count
-            synced_count += 1
-        
-        return {
-            "success": True,
-            "synced": synced_count,
-            "message": f"Synced {synced_count} emails"
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to sync Gmail: {str(e)}"
-        )
+    """Fetch bank alert emails and create transactions from the ones we can parse. Skips emails already imported."""
+    if not current_user.gmail_connected or not current_user.gmail_refresh_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Gmail not connected")
 
-@router.get("/emails")
-async def list_gmail_emails(
-    user_id: str = Query(...),
-    db: Session = Depends(get_db)
-):
-    """List bank emails from Gmail (for debugging)"""
-    user = UserService.get_user_by_id(db, user_id)
-    
-    if not user or not user.gmail_connected or not user.gmail_refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Gmail not connected"
+    emails = gmail_service.search_bank_emails(current_user.gmail_refresh_token)
+
+    imported = 0
+    skipped_duplicate = 0
+    skipped_unparsed = 0
+
+    for email in emails:
+        marker = f"gmail:{email['id']}"
+
+        already_exists = db.query(Transaction).filter(
+            Transaction.user_id == current_user.id,
+            Transaction.raw_text == marker
+        ).first()
+        if already_exists:
+            skipped_duplicate += 1
+            continue
+
+        parsed = parse_bank_email(
+            subject=email.get("subject", ""),
+            body=email.get("body", ""),
+            snippet=email.get("snippet", ""),
+            sender=email.get("from", "")
         )
-    
-    try:
-        emails = gmail_service.search_bank_emails(user.gmail_refresh_token)
-        return {
-            "count": len(emails),
-            "emails": emails
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+        if not parsed:
+            skipped_unparsed += 1
+            continue
+
+        try:
+            email_date = parsedate_to_datetime(email["date"])
+        except Exception:
+            email_date = datetime.utcnow()
+
+        transaction = Transaction(
+            user_id=current_user.id,
+            amount=parsed["amount"],
+            currency="INR",
+            type=parsed["type"],
+            category="other",
+            merchant=parsed["merchant"],
+            description=email.get("subject", "")[:200],
+            date=email_date,
+            source="gmail",
+            raw_text=marker,
+            is_recurring=False
         )
+        db.add(transaction)
+        imported += 1
+
+    db.commit()
+
+    return {
+        "imported": imported,
+        "skipped_duplicate": skipped_duplicate,
+        "skipped_unparsed": skipped_unparsed
+    }

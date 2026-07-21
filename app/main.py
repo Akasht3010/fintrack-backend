@@ -5,8 +5,7 @@ from app.config.database import Base, engine
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.models.budget import Budget
-from app.api import auth, transactions, budgets, google_auth
-# from app.api import gmail  # TODO: Fix Gmail import
+from app.api import auth, transactions, budgets, google_auth, gmail
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,7 +34,7 @@ app.include_router(auth.router)
 app.include_router(transactions.router)
 app.include_router(budgets.router)
 app.include_router(google_auth.router)
-# app.include_router(gmail.router)  # TODO: Enable once Gmail imports work
+app.include_router(gmail.router)
 
 @app.get("/health")
 async def health_check():
