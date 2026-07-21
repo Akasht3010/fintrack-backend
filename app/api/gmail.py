@@ -11,6 +11,7 @@ from app.config.database import get_db
 from app.services.gmail_service import GmailService
 from app.services.user_service import UserService
 from app.services.email_parser import parse_bank_email
+from app.services.categorizer import categorize_merchant
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.utils.auth import get_current_user, verify_token
@@ -143,7 +144,7 @@ async def sync_gmail_emails(
             amount=parsed["amount"],
             currency="INR",
             type=parsed["type"],
-            category="other",
+            category=categorize_merchant(parsed["merchant"], email.get("subject", "")),
             merchant=parsed["merchant"],
             description=email.get("subject", "")[:200],
             date=email_date,

@@ -23,6 +23,12 @@ class TransactionBase(BaseModel):
 class TransactionCreate(TransactionBase):
     raw_text: Optional[str] = None
 
+class TransactionUpdate(BaseModel):
+    amount: Optional[float] = None
+    category: Optional[TransactionCategory] = None
+    merchant: Optional[str] = None
+    description: Optional[str] = None
+
 class TransactionResponse(TransactionBase):
     id: str
     user_id: str
