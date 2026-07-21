@@ -1,7 +1,6 @@
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 import base64
 import os
 from datetime import datetime, timedelta
@@ -49,26 +48,25 @@ class GmailService:
         return build('gmail', 'v1', credentials=credentials)
 
     def fetch_emails(self, refresh_token: str, query: str = 'is:unread', max_results: int = 10):
-        try:
-            service = self.get_gmail_service(refresh_token)
-            results = service.users().messages().list(
-                userId='me',
-                q=query,
-                maxResults=max_results
-            ).execute()
+        # Let HttpError propagate — a real API failure (e.g. Gmail API not
+        # enabled, revoked access) must surface as an error, not look
+        # identical to "no matching emails found".
+        service = self.get_gmail_service(refresh_token)
+        results = service.users().messages().list(
+            userId='me',
+            q=query,
+            maxResults=max_results
+        ).execute()
 
-            messages = results.get('messages', [])
-            emails = []
+        messages = results.get('messages', [])
+        emails = []
 
-            for msg in messages:
-                email = self.get_email_details(service, msg['id'])
-                if email:
-                    emails.append(email)
+        for msg in messages:
+            email = self.get_email_details(service, msg['id'])
+            if email:
+                emails.append(email)
 
-            return emails
-        except HttpError as error:
-            print(f'An error occurred: {error}')
-            return []
+        return emails
 
     def get_email_details(self, service, message_id: str) -> dict:
         try:
@@ -119,6 +117,15 @@ class GmailService:
         """Search for bank transaction emails from the last N days"""
         date_limit = (datetime.now() - timedelta(days=days)).strftime('%Y/%m/%d')
 
-        query = f'after:{date_limit} (from:noreply@hdfc OR from:alerts@icicibank OR from:alerts@axisbank OR from:noreply@sbi OR from:alert@kotak)'
+        # Keyword-based rather than guessing specific bank sender addresses —
+        # far more likely to actually match real alert emails regardless of
+        # which bank sent them. False positives are filtered out downstream
+        # by the amount parser (an email with no parseable amount is skipped).
+        keywords = (
+            'debited OR credited OR "transaction alert" OR "payment alert" '
+            'OR "account alert" OR "has been debited" OR "has been credited" '
+            'OR "spent on your" OR "you paid" OR "money received"'
+        )
+        query = f'after:{date_limit} ({keywords})'
 
         return self.fetch_emails(refresh_token, query=query, max_results=50)

@@ -78,7 +78,13 @@ async def sync_gmail_emails(
     if not current_user.gmail_connected or not current_user.gmail_refresh_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Gmail not connected")
 
-    emails = gmail_service.search_bank_emails(current_user.gmail_refresh_token)
+    try:
+        emails = gmail_service.search_bank_emails(current_user.gmail_refresh_token)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Couldn't reach Gmail: {str(e)}"
+        )
 
     imported = 0
     skipped_duplicate = 0
