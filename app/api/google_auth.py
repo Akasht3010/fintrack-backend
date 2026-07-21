@@ -1,4 +1,11 @@
 import os
+
+# Google returns scopes as full canonical URIs (e.g. .../auth/userinfo.email)
+# even when requested by their short names (email, profile) — oauthlib treats
+# that as a scope mismatch and raises unless told to relax. Must be set before
+# any oauthlib token parsing happens.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
