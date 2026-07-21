@@ -89,6 +89,7 @@ async def sync_gmail_emails(
     imported = 0
     skipped_duplicate = 0
     skipped_unparsed = 0
+    seen_this_sync = set()
 
     for email in emails:
         marker = f"gmail:{email['id']}"
@@ -115,6 +116,27 @@ async def sync_gmail_emails(
             email_date = parsedate_to_datetime(email["date"])
         except Exception:
             email_date = datetime.utcnow()
+
+        # Some banks send multiple emails for the same underlying transaction
+        # (e.g. a generic alert + a separate fee notice) with different
+        # message IDs but the same amount and timestamp — catch those too,
+        # both within this sync batch and against already-imported ones.
+        dedup_key = (parsed["amount"], email_date)
+        if dedup_key in seen_this_sync:
+            skipped_duplicate += 1
+            continue
+
+        duplicate_amount_date = db.query(Transaction).filter(
+            Transaction.user_id == current_user.id,
+            Transaction.source == "gmail",
+            Transaction.amount == parsed["amount"],
+            Transaction.date == email_date
+        ).first()
+        if duplicate_amount_date:
+            skipped_duplicate += 1
+            continue
+
+        seen_this_sync.add(dedup_key)
 
         transaction = Transaction(
             user_id=current_user.id,
