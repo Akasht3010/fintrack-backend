@@ -1,6 +1,9 @@
+from datetime import datetime
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 from app.config.database import get_db
 from app.schemas.transaction import TransactionCreate, TransactionUpdate, TransactionResponse, TransactionList
 from app.models.transaction import Transaction
@@ -38,11 +41,31 @@ async def create_transaction(
 async def list_transactions(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    category: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, description="Search merchant or description"),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
+    min_amount: Optional[float] = Query(None),
+    max_amount: Optional[float] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get the authenticated user's transactions with pagination"""
+    """Get the authenticated user's transactions, paginated and optionally filtered"""
     query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+
+    if category and category != "all":
+        query = query.filter(Transaction.category == category)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(or_(Transaction.merchant.ilike(like), Transaction.description.ilike(like)))
+    if date_from:
+        query = query.filter(Transaction.date >= date_from)
+    if date_to:
+        query = query.filter(Transaction.date <= date_to)
+    if min_amount is not None:
+        query = query.filter(Transaction.amount >= min_amount)
+    if max_amount is not None:
+        query = query.filter(Transaction.amount <= max_amount)
 
     total = query.count()
 
