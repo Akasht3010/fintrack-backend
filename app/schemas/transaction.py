@@ -25,6 +25,7 @@ class TransactionCreate(TransactionBase):
 
 class TransactionUpdate(BaseModel):
     amount: Optional[float] = None
+    type: Optional[TransactionType] = None
     category: Optional[TransactionCategory] = None
     merchant: Optional[str] = None
     description: Optional[str] = None

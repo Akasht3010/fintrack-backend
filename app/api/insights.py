@@ -33,30 +33,35 @@ async def get_insights(
     year_expr = extract("year", Transaction.date)
     month_expr = extract("month", Transaction.date)
 
-    monthly_rows = (
-        db.query(
-            year_expr.label("year"),
-            month_expr.label("month"),
-            func.sum(Transaction.amount).label("total")
+    def monthly_series(transaction_type: str) -> list[MonthlyTotal]:
+        rows = (
+            db.query(
+                year_expr.label("year"),
+                month_expr.label("month"),
+                func.sum(Transaction.amount).label("total")
+            )
+            .filter(
+                Transaction.user_id == current_user.id,
+                Transaction.type == transaction_type,
+                Transaction.date >= range_start
+            )
+            .group_by(year_expr, month_expr)
+            .all()
         )
-        .filter(
-            Transaction.user_id == current_user.id,
-            Transaction.type == "debit",
-            Transaction.date >= range_start
-        )
-        .group_by(year_expr, month_expr)
-        .all()
-    )
-    totals_by_key = {(int(r.year), int(r.month)): float(r.total) for r in monthly_rows}
+        totals_by_key = {(int(r.year), int(r.month)): float(r.total) for r in rows}
 
-    monthly_totals = []
-    y, m = start_year, start_month
-    for _ in range(months):
-        monthly_totals.append(MonthlyTotal(year=y, month=m, label=month_abbr[m], total=totals_by_key.get((y, m), 0.0)))
-        m += 1
-        if m > 12:
-            m = 1
-            y += 1
+        series = []
+        y, m = start_year, start_month
+        for _ in range(months):
+            series.append(MonthlyTotal(year=y, month=m, label=month_abbr[m], total=totals_by_key.get((y, m), 0.0)))
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+        return series
+
+    monthly_totals = monthly_series("debit")
+    monthly_income_totals = monthly_series("credit")
 
     current_month_start = datetime(now.year, now.month, 1)
     category_rows = (
@@ -94,6 +99,7 @@ async def get_insights(
 
     return InsightsSummary(
         monthly_totals=monthly_totals,
+        monthly_income_totals=monthly_income_totals,
         category_breakdown=category_breakdown,
         top_merchants=top_merchants
     )

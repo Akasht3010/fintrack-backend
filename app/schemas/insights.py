@@ -17,5 +17,6 @@ class MerchantBreakdownItem(BaseModel):
 
 class InsightsSummary(BaseModel):
     monthly_totals: list[MonthlyTotal]
+    monthly_income_totals: list[MonthlyTotal]
     category_breakdown: list[CategoryBreakdownItem]
     top_merchants: list[MerchantBreakdownItem]
