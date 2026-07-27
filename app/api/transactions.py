@@ -123,7 +123,7 @@ async def export_transactions(
     writer.writerow(["Date", "Type", "Amount", "Currency", "Category", "Merchant", "Description", "Source", "Recurring"])
     for t in transactions:
         writer.writerow([
-            t.date.isoformat(),
+            t.date.strftime("%d/%m/%Y %H:%M"),
             t.type,
             t.amount,
             t.currency,
