@@ -1,8 +1,11 @@
+import csv
+import io
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Query as SAQuery, Session
 from sqlalchemy import desc, or_
 from app.config.database import get_db
 from app.schemas.transaction import TransactionCreate, TransactionUpdate, TransactionResponse, TransactionList
@@ -11,6 +14,30 @@ from app.models.user import User
 from app.utils.auth import get_current_user
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+
+def _apply_filters(
+    query: SAQuery,
+    category: Optional[str],
+    q: Optional[str],
+    date_from: Optional[datetime],
+    date_to: Optional[datetime],
+    min_amount: Optional[float],
+    max_amount: Optional[float]
+) -> SAQuery:
+    if category and category != "all":
+        query = query.filter(Transaction.category == category)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(or_(Transaction.merchant.ilike(like), Transaction.description.ilike(like)))
+    if date_from:
+        query = query.filter(Transaction.date >= date_from)
+    if date_to:
+        query = query.filter(Transaction.date <= date_to)
+    if min_amount is not None:
+        query = query.filter(Transaction.amount >= min_amount)
+    if max_amount is not None:
+        query = query.filter(Transaction.amount <= max_amount)
+    return query
 
 @router.post("", response_model=TransactionResponse)
 async def create_transaction(
@@ -52,20 +79,7 @@ async def list_transactions(
 ):
     """Get the authenticated user's transactions, paginated and optionally filtered"""
     query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
-
-    if category and category != "all":
-        query = query.filter(Transaction.category == category)
-    if q:
-        like = f"%{q}%"
-        query = query.filter(or_(Transaction.merchant.ilike(like), Transaction.description.ilike(like)))
-    if date_from:
-        query = query.filter(Transaction.date >= date_from)
-    if date_to:
-        query = query.filter(Transaction.date <= date_to)
-    if min_amount is not None:
-        query = query.filter(Transaction.amount >= min_amount)
-    if max_amount is not None:
-        query = query.filter(Transaction.amount <= max_amount)
+    query = _apply_filters(query, category, q, date_from, date_to, min_amount, max_amount)
 
     total = query.count()
 
@@ -79,6 +93,46 @@ async def list_transactions(
         "page": page,
         "limit": limit
     }
+
+@router.get("/export")
+async def export_transactions(
+    category: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
+    min_amount: Optional[float] = Query(None),
+    max_amount: Optional[float] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Export the authenticated user's transactions (optionally filtered) as CSV"""
+    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+    query = _apply_filters(query, category, q, date_from, date_to, min_amount, max_amount)
+    transactions = query.order_by(desc(Transaction.date)).all()
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Date", "Type", "Amount", "Currency", "Category", "Merchant", "Description", "Source", "Recurring"])
+    for t in transactions:
+        writer.writerow([
+            t.date.isoformat(),
+            t.type,
+            t.amount,
+            t.currency,
+            t.category,
+            t.merchant,
+            t.description,
+            t.source,
+            "yes" if t.is_recurring else "no"
+        ])
+    buffer.seek(0)
+
+    filename = f"fintrack-transactions-{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 async def get_transaction(
