@@ -3,6 +3,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 import base64
 import os
+import httpx
 from datetime import datetime, timedelta
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
@@ -35,6 +36,15 @@ class GmailService:
         flow = Flow.from_client_config(_client_config(), scopes=SCOPES, redirect_uri=redirect_uri)
         flow.fetch_token(code=code)
         return flow.credentials.refresh_token
+
+    def revoke_token(self, refresh_token: str) -> None:
+        """Best-effort: tell Google to revoke this grant so it no longer shows under the user's connected apps."""
+        httpx.post(
+            "https://oauth2.googleapis.com/revoke",
+            params={"token": refresh_token},
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            timeout=10
+        )
 
     def get_gmail_service(self, refresh_token: str):
         credentials = Credentials(

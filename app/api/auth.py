@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.config.database import get_db
@@ -32,6 +34,21 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     access_token: str
     user: UserResponse
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        digits = normalize_phone(value)
+        if len(digits) != 10:
+            raise ValueError("Phone number must be 10 digits")
+        return digits
 
 @router.post("/signup", response_model=SignupResponse)
 async def signup(request: SignupRequest, db: Session = Depends(get_db)):
@@ -83,6 +100,34 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 async def read_current_user(current_user: User = Depends(get_current_user)):
     """Get the authenticated user (identified by the bearer token)"""
+    return current_user
+
+@router.patch("/me", response_model=UserResponse)
+async def update_current_user(
+    request: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update the authenticated user's name/email/phone. Email and phone must stay unique."""
+    updates = request.model_dump(exclude_unset=True, exclude_none=True)
+
+    if "email" in updates:
+        email = updates["email"].lower()
+        existing = UserService.get_user_by_email(db, email)
+        if existing and existing.id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
+        updates["email"] = email
+
+    if "phone" in updates:
+        existing = UserService.get_user_by_phone(db, updates["phone"])
+        if existing and existing.id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this phone number already exists")
+
+    for field, value in updates.items():
+        setattr(current_user, field, value)
+
+    db.commit()
+    db.refresh(current_user)
     return current_user
 
 @router.post("/refresh")

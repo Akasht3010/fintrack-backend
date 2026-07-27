@@ -70,6 +70,24 @@ async def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
     return RedirectResponse(f"{app_redirect_uri}{separator}gmail_connected=true")
 
 
+@router.post("/disconnect")
+async def gmail_disconnect(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Disconnect Gmail: best-effort revoke with Google, then clear the stored token either way."""
+    if current_user.gmail_refresh_token:
+        try:
+            gmail_service.revoke_token(current_user.gmail_refresh_token)
+        except Exception:
+            pass
+
+    current_user.gmail_connected = False
+    current_user.gmail_refresh_token = None
+    db.commit()
+
+    return {"gmail_connected": False}
+
 @router.post("/sync")
 async def sync_gmail_emails(
     current_user: User = Depends(get_current_user),
