@@ -5,11 +5,15 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.schemas.user import UserCreate, UserResponse
 from app.services.user_service import UserService, DuplicateUserError, normalize_phone
+from app.services.gmail_service import GmailService
 from app.utils.auth import create_access_token, get_current_user
 from app.models.user import User
+from app.models.transaction import Transaction
+from app.models.budget import Budget
 from pydantic import BaseModel, EmailStr, field_validator
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+gmail_service = GmailService()
 
 class SignupRequest(BaseModel):
     name: str
@@ -129,6 +133,25 @@ async def update_current_user(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+@router.delete("/me")
+async def delete_current_user(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Permanently delete the authenticated user's account and all their data. Irreversible."""
+    if current_user.gmail_refresh_token:
+        try:
+            gmail_service.revoke_token(current_user.gmail_refresh_token)
+        except Exception:
+            pass
+
+    db.query(Transaction).filter(Transaction.user_id == current_user.id).delete()
+    db.query(Budget).filter(Budget.user_id == current_user.id).delete()
+    db.delete(current_user)
+    db.commit()
+
+    return {"message": "Account deleted"}
 
 @router.post("/refresh")
 async def refresh_token(current_user: User = Depends(get_current_user)):
