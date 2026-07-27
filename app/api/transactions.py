@@ -22,7 +22,9 @@ def _apply_filters(
     date_from: Optional[datetime],
     date_to: Optional[datetime],
     min_amount: Optional[float],
-    max_amount: Optional[float]
+    max_amount: Optional[float],
+    source: Optional[str] = None,
+    type: Optional[str] = None
 ) -> SAQuery:
     if category and category != "all":
         query = query.filter(Transaction.category == category)
@@ -37,6 +39,10 @@ def _apply_filters(
         query = query.filter(Transaction.amount >= min_amount)
     if max_amount is not None:
         query = query.filter(Transaction.amount <= max_amount)
+    if source and source != "all":
+        query = query.filter(Transaction.source == source)
+    if type and type != "all":
+        query = query.filter(Transaction.type == type)
     return query
 
 @router.post("", response_model=TransactionResponse)
@@ -102,12 +108,14 @@ async def export_transactions(
     date_to: Optional[datetime] = Query(None),
     min_amount: Optional[float] = Query(None),
     max_amount: Optional[float] = Query(None),
+    source: Optional[str] = Query(None, description="manual, gmail, sms, or aa"),
+    type: Optional[str] = Query(None, description="debit or credit"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Export the authenticated user's transactions (optionally filtered) as CSV"""
     query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
-    query = _apply_filters(query, category, q, date_from, date_to, min_amount, max_amount)
+    query = _apply_filters(query, category, q, date_from, date_to, min_amount, max_amount, source, type)
     transactions = query.order_by(desc(Transaction.date)).all()
 
     buffer = io.StringIO()
