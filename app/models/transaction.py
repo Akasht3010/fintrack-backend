@@ -8,6 +8,7 @@ class Transaction(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    account_id = Column(String, ForeignKey("accounts.id"), nullable=True, index=True)
     amount = Column(Float, nullable=False)
     currency = Column(String, default="INR")
     type = Column(String, nullable=False)  # debit, credit

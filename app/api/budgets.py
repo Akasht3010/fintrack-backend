@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.schemas.budget import BudgetCreate, BudgetUpdate, BudgetResponse
 from app.services.budget_service import BudgetService, DuplicateBudgetError
+from app.services.category_service import CategoryService
 from app.models.user import User
 from app.utils.auth import get_current_user
 
@@ -15,6 +16,9 @@ async def create_budget(
     db: Session = Depends(get_db)
 ):
     """Create a budget for a category over the current week/month. 409s if one already covers this category."""
+    if not CategoryService.name_exists(db, current_user.id, budget.category):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown category '{budget.category}'")
+
     try:
         created = BudgetService.create_budget(
             db, current_user.id, budget.category, budget.limit_amount, budget.period

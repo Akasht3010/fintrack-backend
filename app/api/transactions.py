@@ -11,7 +11,17 @@ from app.config.database import get_db
 from app.schemas.transaction import TransactionCreate, TransactionUpdate, TransactionResponse, TransactionList
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.services.account_service import AccountService
+from app.services.category_service import CategoryService
 from app.utils.auth import get_current_user
+
+def _ensure_category_exists(db: Session, user_id: str, category: str) -> None:
+    if not CategoryService.name_exists(db, user_id, category):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown category '{category}'")
+
+def _ensure_account_owned(db: Session, user_id: str, account_id: Optional[str]) -> None:
+    if account_id is not None and not AccountService.get_own(db, user_id, account_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown account '{account_id}'")
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -52,8 +62,12 @@ async def create_transaction(
     db: Session = Depends(get_db)
 ):
     """Create a new transaction for the authenticated user"""
+    _ensure_category_exists(db, current_user.id, transaction.category)
+    _ensure_account_owned(db, current_user.id, transaction.account_id)
+
     db_transaction = Transaction(
         user_id=current_user.id,
+        account_id=transaction.account_id,
         amount=transaction.amount,
         currency=transaction.currency,
         type=transaction.type,
@@ -118,9 +132,11 @@ async def export_transactions(
     query = _apply_filters(query, category, q, date_from, date_to, min_amount, max_amount, source, type)
     transactions = query.order_by(desc(Transaction.date)).all()
 
+    account_names = {a.id: a.name for a in AccountService.list_visible(db, current_user.id, include_archived=True)}
+
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["Date", "Type", "Amount", "Currency", "Category", "Merchant", "Description", "Source", "Recurring"])
+    writer.writerow(["Date", "Type", "Amount", "Currency", "Category", "Merchant", "Description", "Source", "Account", "Recurring"])
     for t in transactions:
         writer.writerow([
             t.date.strftime("%d/%m/%Y %H:%M"),
@@ -131,6 +147,7 @@ async def export_transactions(
             t.merchant,
             t.description,
             t.source,
+            account_names.get(t.account_id, ""),
             "yes" if t.is_recurring else "no"
         ])
     buffer.seek(0)
@@ -179,6 +196,11 @@ async def update_transaction(
         )
 
     updates = update.model_dump(exclude_unset=True)
+    if "category" in updates:
+        _ensure_category_exists(db, current_user.id, updates["category"])
+    if "account_id" in updates:
+        _ensure_account_owned(db, current_user.id, updates["account_id"])
+
     for field, value in updates.items():
         setattr(transaction, field, value)
 

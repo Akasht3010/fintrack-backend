@@ -2,13 +2,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Literal
 
-BudgetCategory = Literal[
-    "food", "transport", "shopping", "entertainment",
-    "health", "utilities", "rent", "subscriptions", "transfer", "other"
-]
-
 class BudgetBase(BaseModel):
-    category: BudgetCategory
+    category: str
     limit_amount: float = Field(gt=0)
     period: Literal["weekly", "monthly"]
 

@@ -3,22 +3,19 @@ from datetime import datetime
 from typing import Optional, Literal
 
 TransactionType = Literal["debit", "credit"]
-TransactionCategory = Literal[
-    "food", "transport", "shopping", "entertainment", 
-    "health", "utilities", "rent", "subscriptions", "transfer", "other"
-]
 TransactionSource = Literal["gmail", "manual", "sms", "aa"]
 
 class TransactionBase(BaseModel):
     amount: float
     currency: str
     type: TransactionType
-    category: TransactionCategory
+    category: str
     merchant: str
     description: str
     date: datetime
     source: TransactionSource
     is_recurring: bool = False
+    account_id: Optional[str] = None
 
 class TransactionCreate(TransactionBase):
     raw_text: Optional[str] = None
@@ -26,9 +23,10 @@ class TransactionCreate(TransactionBase):
 class TransactionUpdate(BaseModel):
     amount: Optional[float] = None
     type: Optional[TransactionType] = None
-    category: Optional[TransactionCategory] = None
+    category: Optional[str] = None
     merchant: Optional[str] = None
     description: Optional[str] = None
+    account_id: Optional[str] = None
 
 class TransactionResponse(TransactionBase):
     id: str

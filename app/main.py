@@ -2,15 +2,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config.database import Base, engine
+from app.config.init_db import migrate_schema, seed_default_categories
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.models.budget import Budget
-from app.api import auth, transactions, budgets, google_auth, gmail, insights, recurring
+from app.models.category import Category
+from app.models.account import Account
+from app.api import auth, transactions, budgets, google_auth, gmail, insights, recurring, categories, accounts
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 FastAPI starting up")
     Base.metadata.create_all(bind=engine)
+    migrate_schema()
+    seed_default_categories()
     yield
     print("🛑 FastAPI shutting down")
 
@@ -37,6 +42,8 @@ app.include_router(google_auth.router)
 app.include_router(gmail.router)
 app.include_router(insights.router)
 app.include_router(recurring.router)
+app.include_router(categories.router)
+app.include_router(accounts.router)
 
 @app.get("/health")
 async def health_check():
