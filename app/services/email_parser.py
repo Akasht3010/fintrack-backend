@@ -33,10 +33,15 @@ VPA_BARE_PATTERN = re.compile(r"VPA\s+([\w.\-]+)@[\w.\-]+", re.IGNORECASE)
 # same line or the next one.
 BENEFICIARY_PATTERN = re.compile(r"Beneficiary\s*Name\s*[:\-]?\s*([^\n\r]{2,60})", re.IGNORECASE)
 
+# The trailing boundary treats "." as a clause end only when it's followed
+# by whitespace/end-of-string, not mid-token — otherwise merchant names like
+# "AMAZON.IN" get truncated to "AMAZON" at the domain dot.
+_MERCHANT_BOUNDARY = r"(?:\s+(?:on|dated|via|using)\b|[.,](?=\s|$)|\n|$)"
+
 MERCHANT_PATTERNS = [
-    re.compile(r"\bat\s+([A-Za-z0-9 &.'_-]{2,40}?)(?:\s+(?:on|dated|via)\b|[.,\n]|$)", re.IGNORECASE),
-    re.compile(r"\btowards\s+([A-Za-z0-9 &.'_-]{2,40}?)(?:\s+(?:on|dated|via)\b|[.,\n]|$)", re.IGNORECASE),
-    re.compile(r"\bto\s+([A-Za-z0-9 &.'_-]{2,40}?)(?:\s+(?:on|dated|via)\b|[.,\n]|$)", re.IGNORECASE),
+    re.compile(r"\bat\s+([A-Za-z0-9 &.'_-]{2,40}?)" + _MERCHANT_BOUNDARY, re.IGNORECASE),
+    re.compile(r"\btowards\s+([A-Za-z0-9 &.'_-]{2,40}?)" + _MERCHANT_BOUNDARY, re.IGNORECASE),
+    re.compile(r"\bto\s+([A-Za-z0-9 &.'_-]{2,40}?)" + _MERCHANT_BOUNDARY, re.IGNORECASE),
 ]
 
 TRANSFER_MODE_PATTERN = re.compile(r"\b(NEFT|IMPS|RTGS)\b", re.IGNORECASE)
