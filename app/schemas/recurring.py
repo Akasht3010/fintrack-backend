@@ -6,6 +6,7 @@ class RecurringItem(BaseModel):
     merchant: str
     category: str
     average_amount: float
+    currency: str
     cadence: str
     occurrences: int
     last_date: datetime

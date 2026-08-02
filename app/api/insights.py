@@ -1,14 +1,15 @@
 from calendar import month_abbr
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import desc, extract, func
+from sqlalchemy import extract, func
 from sqlalchemy.orm import Session
 
 from app.config.database import get_db
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.insights import CategoryBreakdownItem, InsightsSummary, MerchantBreakdownItem, MonthlyTotal
+from app.services.exchange_rate_service import to_home_currency
 from app.utils.auth import get_current_user
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
@@ -33,11 +34,18 @@ async def get_insights(
     year_expr = extract("year", Transaction.date)
     month_expr = extract("month", Transaction.date)
 
+    # Every query below groups by currency in addition to whatever it's
+    # actually reporting on, then converts+combines per group in Python —
+    # a plain SQL SUM would silently add raw INR and USD amounts together.
+    # Sorting/limiting (top merchants) also has to happen after that
+    # conversion, so it moves to Python too.
+
     def monthly_series(transaction_type: str) -> list[MonthlyTotal]:
         rows = (
             db.query(
                 year_expr.label("year"),
                 month_expr.label("month"),
+                Transaction.currency,
                 func.sum(Transaction.amount).label("total")
             )
             .filter(
@@ -45,10 +53,14 @@ async def get_insights(
                 Transaction.type == transaction_type,
                 Transaction.date >= range_start
             )
-            .group_by(year_expr, month_expr)
+            .group_by(year_expr, month_expr, Transaction.currency)
             .all()
         )
-        totals_by_key = {(int(r.year), int(r.month)): float(r.total) for r in rows}
+        totals_by_key: dict[tuple[int, int], float] = {}
+        for r in rows:
+            key = (int(r.year), int(r.month))
+            converted = to_home_currency(float(r.total), r.currency, date(int(r.year), int(r.month), 1))
+            totals_by_key[key] = totals_by_key.get(key, 0.0) + converted
 
         series = []
         y, m = start_year, start_month
@@ -65,21 +77,28 @@ async def get_insights(
 
     current_month_start = datetime(now.year, now.month, 1)
     category_rows = (
-        db.query(Transaction.category, func.sum(Transaction.amount).label("total"))
+        db.query(Transaction.category, Transaction.currency, func.sum(Transaction.amount).label("total"))
         .filter(
             Transaction.user_id == current_user.id,
             Transaction.type == "debit",
             Transaction.date >= current_month_start
         )
-        .group_by(Transaction.category)
-        .order_by(desc("total"))
+        .group_by(Transaction.category, Transaction.currency)
         .all()
     )
-    category_breakdown = [CategoryBreakdownItem(category=r.category, total=float(r.total)) for r in category_rows]
+    category_totals: dict[str, float] = {}
+    for r in category_rows:
+        converted = to_home_currency(float(r.total), r.currency, current_month_start.date())
+        category_totals[r.category] = category_totals.get(r.category, 0.0) + converted
+    category_breakdown = sorted(
+        (CategoryBreakdownItem(category=cat, total=total) for cat, total in category_totals.items()),
+        key=lambda c: c.total, reverse=True
+    )
 
     merchant_rows = (
         db.query(
             Transaction.merchant,
+            Transaction.currency,
             func.sum(Transaction.amount).label("total"),
             func.count(Transaction.id).label("count")
         )
@@ -88,14 +107,18 @@ async def get_insights(
             Transaction.type == "debit",
             Transaction.date >= range_start
         )
-        .group_by(Transaction.merchant)
-        .order_by(desc("total"))
-        .limit(5)
+        .group_by(Transaction.merchant, Transaction.currency)
         .all()
     )
-    top_merchants = [
-        MerchantBreakdownItem(merchant=r.merchant, total=float(r.total), count=r.count) for r in merchant_rows
-    ]
+    merchant_totals: dict[str, dict] = {}
+    for r in merchant_rows:
+        entry = merchant_totals.setdefault(r.merchant, {"total": 0.0, "count": 0})
+        entry["total"] += to_home_currency(float(r.total), r.currency, range_start.date())
+        entry["count"] += r.count
+    top_merchants = sorted(
+        (MerchantBreakdownItem(merchant=m, total=v["total"], count=v["count"]) for m, v in merchant_totals.items()),
+        key=lambda x: x.total, reverse=True
+    )[:5]
 
     return InsightsSummary(
         monthly_totals=monthly_totals,

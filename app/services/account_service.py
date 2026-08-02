@@ -1,8 +1,11 @@
+from datetime import date
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.account import LIABILITY_TYPES, Account
 from app.models.transaction import Transaction
+from app.services.exchange_rate_service import to_home_currency
 
 
 class AccountInUseError(Exception):
@@ -91,17 +94,26 @@ class AccountService:
 
     @staticmethod
     def net_worth(db: Session, user_id: str) -> dict:
+        """
+        Each account's own `balance` stays in that account's native
+        currency (matches how it's displayed). The combined totals below
+        are always in the home currency, so each account's balance is
+        converted before folding it in — otherwise a USD credit card's
+        balance would get added straight to INR bank balances.
+        """
         accounts = AccountService.list_visible(db, user_id)
 
         total_assets = 0.0
         total_liabilities = 0.0
         items = []
+        today = date.today()
         for account in accounts:
             balance = compute_balance(db, account)
+            balance_home = to_home_currency(balance, account.currency, today)
             if account.type in LIABILITY_TYPES:
-                total_liabilities += balance
+                total_liabilities += balance_home
             else:
-                total_assets += balance
+                total_assets += balance_home
             items.append({"id": account.id, "name": account.name, "type": account.type, "balance": balance})
 
         return {

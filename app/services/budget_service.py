@@ -6,6 +6,7 @@ import uuid
 
 from app.models.budget import Budget
 from app.models.transaction import Transaction
+from app.services.exchange_rate_service import to_home_currency
 
 
 class DuplicateBudgetError(Exception):
@@ -28,14 +29,20 @@ def current_period_dates(period: str, now: datetime) -> tuple[datetime, datetime
 
 
 def compute_spent(db: Session, user_id: str, category: str, start_date: datetime, end_date: datetime) -> float:
-    total = db.query(func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
+    """
+    Budgets (limit_amount) are always in the home currency, so spend per
+    currency is converted before combining — a plain SUM would otherwise
+    add raw INR and USD amounts together.
+    """
+    rows = db.query(Transaction.currency, func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
         Transaction.user_id == user_id,
         Transaction.category == category,
         Transaction.type == "debit",
         Transaction.date >= start_date,
         Transaction.date <= end_date
-    ).scalar()
-    return float(total or 0.0)
+    ).group_by(Transaction.currency).all()
+
+    return sum(to_home_currency(float(total or 0.0), currency, start_date.date()) for currency, total in rows)
 
 
 class BudgetService:
