@@ -28,10 +28,18 @@ VPA_NAMED_PATTERN = re.compile(r"VPA\s+[\w.\-]+@[\w.\-]+\s*\(([^)]{2,60})\)", re
 VPA_BARE_PATTERN = re.compile(r"VPA\s+([\w.\-]+)@[\w.\-]+", re.IGNORECASE)
 
 # NEFT/IMPS/RTGS/fund-transfer confirmations lay the payee out as a
-# "Beneficiary Name" field rather than in a sentence — \s* around the label
-# already spans a line break, so this matches whether the value sits on the
-# same line or the next one.
-BENEFICIARY_PATTERN = re.compile(r"Beneficiary\s*Name\s*[:\-]?\s*([^\n\r]{2,60})", re.IGNORECASE)
+# "Beneficiary Name" field among several others — Gmail's HTML-to-text
+# conversion doesn't reliably leave a newline (or even a double space)
+# between adjacent fields, so a real email can read
+# "Beneficiary Name: AKASH KOTAK BANK Beneficiary A/c No.: XX5115" all on
+# one line with single spaces throughout. Bound the capture with the known
+# field labels that follow it in these templates rather than trusting
+# whitespace, or it swallows the next label's text too.
+_BENEFICIARY_BOUNDARY = r"(?=\s*(?:Beneficiary|Bank\s*IFSC|A/c|UTR|Amount|Date|Transaction)\b|[\n\r]|$)"
+BENEFICIARY_PATTERN = re.compile(
+    r"Beneficiary\s*Name\s*[:\-]?\s*([A-Za-z0-9 .&'_-]{2,60}?)" + _BENEFICIARY_BOUNDARY,
+    re.IGNORECASE
+)
 
 # The trailing boundary treats "." as a clause end only when it's followed
 # by whitespace/end-of-string, not mid-token — otherwise merchant names like
@@ -69,10 +77,7 @@ def _extract_merchant(text: str) -> tuple[Optional[str], bool]:
 
     match = BENEFICIARY_PATTERN.search(text)
     if match:
-        # Some banks render the whole details table as one line with big
-        # gaps between fields rather than one field per line — cut at the
-        # first such gap so we don't swallow the next label too.
-        candidate = re.split(r"\s{2,}", match.group(1).strip())[0].strip()
+        candidate = match.group(1).strip()
         if candidate:
             return candidate, True
 

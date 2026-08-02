@@ -66,6 +66,24 @@ def test_neft_extracts_beneficiary_name_field():
     assert result["description"] == "Paid to AKASH KOTAK BANK via NEFT"
 
 
+def test_neft_beneficiary_name_flattened_onto_one_line_with_single_spaces():
+    # Gmail's HTML-to-text conversion doesn't always leave a newline (or even
+    # a double space) between table fields — this reproduces a real prod row
+    # where the merchant came out as "AKASH KOTAK BANK Beneficiary A/c No.:"
+    # because the old boundary only stopped at a newline or a 2+ space gap.
+    result = parse_bank_email(
+        subject="NEFT Transaction",
+        body=(
+            "Beneficiary Name: AKASH KOTAK BANK Beneficiary A/c No.: XX5115 "
+            "Bank IFSC: KKBK0000877 Amount Remitted: INR 18,000.00"
+        ),
+        snippet="",
+        sender="neftinfo.itps <neftinfo.itps@alerts.sbi.bank.in>",
+    )
+    assert result["merchant"] == "AKASH KOTAK BANK"
+    assert result["description"] == "Paid to AKASH KOTAK BANK via NEFT"
+
+
 def test_fund_transfer_extracts_beneficiary_and_tags_mode():
     # Real YONO SBI format: no NEFT/IMPS/RTGS keyword, only "Fund Transfer" prose.
     result = parse_bank_email(
