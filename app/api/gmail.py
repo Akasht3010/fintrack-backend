@@ -100,6 +100,19 @@ async def sync_gmail_emails(
     try:
         emails = gmail_service.search_bank_emails(current_user.gmail_refresh_token)
     except Exception as e:
+        # Google expires refresh tokens after 7 days for OAuth apps still in
+        # "Testing" publishing status (ours is, pending verification) — this
+        # is expected, recurring behavior, not a transient failure. Treat it
+        # as a stale connection: clear it server-side too, so the client
+        # isn't left showing "connected" for a token that no longer works.
+        if "invalid_grant" in str(e):
+            current_user.gmail_connected = False
+            current_user.gmail_refresh_token = None
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Your Gmail connection expired. Please reconnect Gmail from Profile."
+            )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Couldn't reach Gmail: {str(e)}"
