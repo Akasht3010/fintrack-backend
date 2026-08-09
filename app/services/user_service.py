@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.schemas.user import UserCreate
+from app.utils.auth import hash_password
 import re
 import uuid
 
@@ -56,6 +57,7 @@ class UserService:
             name=user_create.name,
             email=email,
             phone=phone,
+            password_hash=hash_password(user_create.password),
             gmail_connected=False
         )
         db.add(db_user)

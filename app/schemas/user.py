@@ -8,7 +8,7 @@ class UserBase(BaseModel):
     phone: str
 
 class UserCreate(UserBase):
-    pass
+    password: str
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None

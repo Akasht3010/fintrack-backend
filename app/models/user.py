@@ -10,6 +10,9 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False, index=True)
     phone = Column(String, nullable=True)
+    # Nullable: accounts created via Google sign-in have no password — they
+    # authenticate via Google's own identity check instead of password+OTP.
+    password_hash = Column(String, nullable=True)
     avatar = Column(String, nullable=True)
     google_id = Column(String, unique=True, nullable=True)
     gmail_connected = Column(Boolean, default=False)

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional
+import bcrypt
 import jwt
 import os
 from fastapi import Depends, HTTPException, status
@@ -11,8 +12,17 @@ from app.models.user import User
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+PENDING_TOKEN_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "5"))
 
 security = HTTPBearer()
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -34,6 +44,37 @@ def verify_token(token: str):
         return user_id
     except jwt.InvalidTokenError:
         return None
+
+
+def create_pending_token(user_id: str, purpose: str) -> str:
+    """A short-lived token identifying a user who passed the password check but
+    hasn't completed OTP verification yet — deliberately separate from a real
+    access token so it can't be used to call authenticated routes."""
+    return create_access_token(
+        data={"sub": user_id, "purpose": purpose},
+        expires_delta=timedelta(minutes=PENDING_TOKEN_EXPIRE_MINUTES)
+    )
+
+
+def decode_pending_token(token: str) -> Optional[dict]:
+    """Like verify_pending_token, but doesn't require knowing the purpose up
+    front — used by /resend-otp, which serves both the login and
+    password-reset flows and just needs to reissue a code for whichever
+    purpose the token was already scoped to."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if not payload.get("sub") or not payload.get("purpose"):
+            return None
+        return payload
+    except jwt.InvalidTokenError:
+        return None
+
+
+def verify_pending_token(token: str, purpose: str) -> Optional[str]:
+    payload = decode_pending_token(token)
+    if not payload or payload.get("purpose") != purpose:
+        return None
+    return payload.get("sub")
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),

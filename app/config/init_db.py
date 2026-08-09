@@ -4,6 +4,7 @@ from app.models.transaction import Transaction
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.account import Account
+from app.models.otp_code import OtpCode
 from sqlalchemy import inspect, text
 
 # Order matches the categories this app shipped with before custom
@@ -53,6 +54,12 @@ def migrate_schema():
     if "account_id" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE transactions ADD COLUMN account_id VARCHAR"))
+
+    if "users" in inspector.get_table_names():
+        user_columns = {col["name"] for col in inspector.get_columns("users")}
+        if "password_hash" not in user_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR"))
 
 def init_db():
     print(f"🔌 Database URL: {engine.url}")
