@@ -19,6 +19,9 @@ from app.utils.auth import (
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.models.budget import Budget
+from app.models.account import Account
+from app.models.category import Category
+from app.models.otp_code import OtpCode
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -341,8 +344,14 @@ async def delete_current_user(
         except Exception:
             pass
 
+    # Every table with a hard FK to users.id has to be cleared first, or the
+    # final delete hits an IntegrityError — Transaction before Account since
+    # transactions reference accounts (no FK there, but tidiest order).
     db.query(Transaction).filter(Transaction.user_id == current_user.id).delete()
     db.query(Budget).filter(Budget.user_id == current_user.id).delete()
+    db.query(Account).filter(Account.user_id == current_user.id).delete()
+    db.query(Category).filter(Category.user_id == current_user.id).delete()
+    db.query(OtpCode).filter(OtpCode.user_id == current_user.id).delete()
     db.delete(current_user)
     db.commit()
 
