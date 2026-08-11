@@ -1,9 +1,18 @@
 import re
 from typing import Optional, TypedDict
 
-AMOUNT_PATTERN = re.compile(r"(?:INR|Rs\.?|₹)\s?([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE)
+# Currency before amount ("INR 500", "INR: 500.00", "Rs.500", "₹500") is the
+# common case; some templates put the currency after instead ("500.00 INR"),
+# so both orders are tried, in that order, at match time.
+AMOUNT_PATTERNS = [
+    re.compile(r"(?:INR|Rs\.?|₹)\s*[:.]?\s*([\d,]+(?:\.\d{1,2})?)", re.IGNORECASE),
+    re.compile(r"([\d,]+(?:\.\d{1,2})?)\s*(?:INR|Rs\.?|₹)", re.IGNORECASE),
+]
 
-DEBIT_WORDS = re.compile(r"\b(debited|spent|paid|purchase|withdrawn|debit)\b", re.IGNORECASE)
+DEBIT_WORDS = re.compile(
+    r"\b(debited|spent|paid|purchase|purchased|withdrawn|debit|used|charged|billed|transaction\s+of)\b",
+    re.IGNORECASE
+)
 CREDIT_WORDS = re.compile(r"\b(credited|received|deposited|credit|refund)\b", re.IGNORECASE)
 
 # Emails announcing a payment attempt that didn't go through — no money
@@ -122,7 +131,11 @@ def parse_bank_email(subject: str, body: str, snippet: str, sender: str) -> Opti
     if FAILURE_WORDS.search(text):
         return None
 
-    amount_match = AMOUNT_PATTERN.search(text)
+    amount_match = None
+    for pattern in AMOUNT_PATTERNS:
+        amount_match = pattern.search(text)
+        if amount_match:
+            break
     if not amount_match:
         return None
 
