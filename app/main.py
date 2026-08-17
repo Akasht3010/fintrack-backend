@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -26,9 +27,18 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# The mobile app itself isn't subject to CORS (browsers enforce it, not RN's
+# networking layer) — this only matters for browser-based clients (Expo web,
+# the /docs Swagger UI making cross-origin calls, or any future web
+# frontend). Origins must be listed explicitly since allow_origins=["*"]
+# combined with allow_credentials=True is both rejected by browsers and,
+# were it accepted, would let any website make credentialed requests using
+# a logged-in user's browser session.
+cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

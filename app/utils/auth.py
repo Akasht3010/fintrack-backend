@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.models.user import User
 
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    # No hardcoded fallback: a guessable default would let anyone forge
+    # valid JWTs for any user if this ever got deployed without the env
+    # var set, instead of failing loudly at startup.
+    raise RuntimeError("SECRET_KEY environment variable must be set")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 PENDING_TOKEN_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "5"))
