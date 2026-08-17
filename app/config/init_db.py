@@ -61,6 +61,20 @@ def migrate_schema():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR"))
 
+    existing_index_names = {idx["name"] for idx in inspector.get_indexes("transactions")}
+    if "uq_transactions_user_raw_text" not in existing_index_names:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX uq_transactions_user_raw_text "
+                    "ON transactions (user_id, raw_text) WHERE raw_text IS NOT NULL"
+                ))
+        except Exception as e:
+            # Only fails if duplicate (user_id, raw_text) rows already exist
+            # from before this constraint existed — don't block startup on
+            # cleaning that up, just leave the app running unconstrained.
+            print(f"⚠️  Could not create transaction dedup index (existing duplicates?): {e}")
+
 def init_db():
     print(f"🔌 Database URL: {engine.url}")
     Base.metadata.create_all(bind=engine)

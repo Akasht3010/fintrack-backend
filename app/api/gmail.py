@@ -4,7 +4,8 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
-from datetime import datetime
+from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from app.config.database import get_db
@@ -146,6 +147,13 @@ async def sync_gmail_emails(
 
         try:
             email_date = parsedate_to_datetime(email["date"])
+            # parsedate_to_datetime returns a tz-aware datetime carrying the
+            # sender's offset, but the `date` column is naive UTC (same as
+            # every other source) — storing it as-is would skew this
+            # transaction's date by that offset, corrupting budget-period
+            # bucketing, monthly insights, and recurring-cadence detection.
+            if email_date.tzinfo is not None:
+                email_date = email_date.astimezone(timezone.utc).replace(tzinfo=None)
         except Exception:
             email_date = datetime.utcnow()
 
@@ -184,9 +192,16 @@ async def sync_gmail_emails(
             is_recurring=False
         )
         db.add(transaction)
-        imported += 1
-
-    db.commit()
+        try:
+            db.commit()
+            imported += 1
+        except IntegrityError:
+            # A concurrent sync (or retried request) inserted the same
+            # (user_id, raw_text) marker first — the unique index catches
+            # what the check above raced against. Treat it as a duplicate,
+            # not a failure.
+            db.rollback()
+            skipped_duplicate += 1
 
     return {
         "imported": imported,

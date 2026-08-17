@@ -1,6 +1,7 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.config.database import get_db
 from app.models.user import User
@@ -80,9 +81,15 @@ async def sync_sms_messages(
             is_recurring=False
         )
         db.add(transaction)
-        imported += 1
-
-    db.commit()
+        try:
+            db.commit()
+            imported += 1
+        except IntegrityError:
+            # Same race as Gmail sync: a concurrent/retried sync inserted
+            # this (user_id, raw_text) marker first. The unique index
+            # catches it — count as a duplicate rather than failing.
+            db.rollback()
+            skipped_duplicate += 1
 
     return SmsSyncResponse(
         imported=imported,

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, DateTime, Boolean, ForeignKey, func, Index
+from sqlalchemy import Column, String, Float, DateTime, Boolean, ForeignKey, func, Index, text
 from app.config.database import Base
 from datetime import datetime
 import uuid
@@ -24,6 +24,18 @@ class Transaction(Base):
 
     __table_args__ = (
         Index('idx_user_date', 'user_id', 'date'),
+        # `raw_text` carries the per-source dedup marker (gmail:<id>,
+        # sms:<address>:<date>) for imported transactions; manual ones leave
+        # it null. Backed by a DB constraint (not just the app-level
+        # check-then-insert in the sync endpoints) so two concurrent syncs
+        # can't both slip past the check and double-import the same message.
+        Index(
+            'uq_transactions_user_raw_text',
+            'user_id', 'raw_text',
+            unique=True,
+            postgresql_where=text('raw_text IS NOT NULL'),
+            sqlite_where=text('raw_text IS NOT NULL'),
+        ),
     )
 
     def __repr__(self):
