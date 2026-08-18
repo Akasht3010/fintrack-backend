@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Query as SAQuery, Session
 from sqlalchemy import desc, or_
+from sqlalchemy.exc import IntegrityError
 from app.config.database import get_db
 from app.schemas.transaction import TransactionCreate, TransactionUpdate, TransactionResponse, TransactionList
 from app.models.transaction import Transaction
@@ -80,7 +81,18 @@ async def create_transaction(
         is_recurring=transaction.is_recurring
     )
     db.add(db_transaction)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Same (user_id, raw_text) dedup index the Gmail/SMS sync endpoints
+        # rely on — a direct API call can hit it too (raw_text is
+        # client-settable), so it needs the same graceful handling rather
+        # than surfacing as an unhandled 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A transaction with this raw_text already exists for this account"
+        )
     db.refresh(db_transaction)
     return db_transaction
 
