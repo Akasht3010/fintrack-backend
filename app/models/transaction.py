@@ -1,14 +1,13 @@
-from sqlalchemy import Column, String, Float, DateTime, Boolean, ForeignKey, func, Index, text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, func, Index, text
 from app.config.database import Base
 from datetime import datetime
-import uuid
 
 class Transaction(Base):
     __tablename__ = "transactions"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    account_id = Column(String, ForeignKey("accounts.id"), nullable=True, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True, index=True)
     amount = Column(Float, nullable=False)
     currency = Column(String, default="INR")
     type = Column(String, nullable=False)  # debit, credit

@@ -15,7 +15,7 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
 
 class UserResponse(BaseModel):
-    id: str
+    id: int
     name: str
     email: str
     phone: Optional[str] = None

@@ -30,7 +30,7 @@ def _cadence_for_interval(avg_interval_days: float) -> Optional[str]:
             return cadence
     return None
 
-def detect_recurring(db: Session, user_id: str) -> List[dict]:
+def detect_recurring(db: Session, user_id: int) -> List[dict]:
     """Group the user's debit transactions by merchant and flag groups whose
     spacing and amount are consistent enough to be a recurring bill."""
     transactions = (

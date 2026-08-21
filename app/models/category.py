@@ -1,12 +1,11 @@
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, func, UniqueConstraint
 from app.config.database import Base
-import uuid
 
 class Category(Base):
     __tablename__ = "categories"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)  # NULL = built-in default, visible to everyone
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # NULL = built-in default, visible to everyone
     name = Column(String, nullable=False)
     icon = Column(String, nullable=False, default="📌")
     sort_order = Column(Integer, nullable=True)  # only set on seeded defaults, to preserve their original order

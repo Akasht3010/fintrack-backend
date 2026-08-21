@@ -16,11 +16,11 @@ from app.services.account_service import AccountService
 from app.services.category_service import CategoryService
 from app.utils.auth import get_current_user
 
-def _ensure_category_exists(db: Session, user_id: str, category: str) -> None:
+def _ensure_category_exists(db: Session, user_id: int, category: str) -> None:
     if not CategoryService.name_exists(db, user_id, category):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown category '{category}'")
 
-def _ensure_account_owned(db: Session, user_id: str, account_id: Optional[str]) -> None:
+def _ensure_account_owned(db: Session, user_id: int, account_id: Optional[int]) -> None:
     if account_id is not None and not AccountService.get_own(db, user_id, account_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown account '{account_id}'")
 
@@ -184,7 +184,7 @@ async def export_transactions(
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 async def get_transaction(
-    transaction_id: str,
+    transaction_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -202,7 +202,7 @@ async def get_transaction(
 
 @router.patch("/{transaction_id}", response_model=TransactionResponse)
 async def update_transaction(
-    transaction_id: str,
+    transaction_id: int,
     update: TransactionUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -233,7 +233,7 @@ async def update_transaction(
 
 @router.delete("/{transaction_id}")
 async def delete_transaction(
-    transaction_id: str,
+    transaction_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

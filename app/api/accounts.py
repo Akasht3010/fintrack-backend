@@ -41,7 +41,7 @@ async def create_account(
 
 @router.patch("/{account_id}", response_model=AccountResponse)
 async def update_account(
-    account_id: str,
+    account_id: int,
     payload: AccountUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -56,7 +56,7 @@ async def update_account(
 
 @router.delete("/{account_id}")
 async def delete_account(
-    account_id: str,
+    account_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

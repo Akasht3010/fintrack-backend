@@ -2,7 +2,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
 import calendar
-import uuid
 
 from app.models.budget import Budget
 from app.models.transaction import Transaction
@@ -28,7 +27,7 @@ def current_period_dates(period: str, now: datetime) -> tuple[datetime, datetime
     return start, end
 
 
-def compute_spent(db: Session, user_id: str, category: str, start_date: datetime, end_date: datetime) -> float:
+def compute_spent(db: Session, user_id: int, category: str, start_date: datetime, end_date: datetime) -> float:
     """
     Budgets (limit_amount) are always in the home currency, so spend per
     currency is converted before combining — a plain SUM would otherwise
@@ -47,7 +46,7 @@ def compute_spent(db: Session, user_id: str, category: str, start_date: datetime
 
 class BudgetService:
     @staticmethod
-    def create_budget(db: Session, user_id: str, category: str, limit_amount: float, period: str) -> Budget:
+    def create_budget(db: Session, user_id: int, category: str, limit_amount: float, period: str) -> Budget:
         now = datetime.utcnow()
         start_date, end_date = current_period_dates(period, now)
 
@@ -61,7 +60,6 @@ class BudgetService:
             raise DuplicateBudgetError()
 
         budget = Budget(
-            id=str(uuid.uuid4()),
             user_id=user_id,
             category=category,
             limit_amount=limit_amount,
@@ -76,7 +74,7 @@ class BudgetService:
         return budget
 
     @staticmethod
-    def list_active_budgets(db: Session, user_id: str) -> list[Budget]:
+    def list_active_budgets(db: Session, user_id: int) -> list[Budget]:
         now = datetime.utcnow()
         return db.query(Budget).filter(
             Budget.user_id == user_id,
@@ -85,7 +83,7 @@ class BudgetService:
         ).order_by(Budget.category).all()
 
     @staticmethod
-    def get_budget(db: Session, user_id: str, budget_id: str) -> Budget:
+    def get_budget(db: Session, user_id: int, budget_id: int) -> Budget:
         return db.query(Budget).filter(Budget.id == budget_id, Budget.user_id == user_id).first()
 
     @staticmethod

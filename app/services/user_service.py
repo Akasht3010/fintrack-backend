@@ -3,7 +3,6 @@ from app.models.user import User
 from app.schemas.user import UserCreate
 from app.utils.auth import hash_password
 import re
-import uuid
 
 
 def normalize_phone(phone: str) -> str:
@@ -29,7 +28,7 @@ class UserService:
         return db.query(User).filter(User.phone == normalized).first()
 
     @staticmethod
-    def get_user_by_id(db: Session, user_id: str) -> User:
+    def get_user_by_id(db: Session, user_id: int) -> User:
         return db.query(User).filter(User.id == user_id).first()
 
     @staticmethod
@@ -53,7 +52,6 @@ class UserService:
             raise DuplicateUserError("phone")
 
         db_user = User(
-            id=str(uuid.uuid4()),
             name=user_create.name,
             email=email,
             phone=phone,
@@ -89,7 +87,6 @@ class UserService:
             return user
 
         db_user = User(
-            id=str(uuid.uuid4()),
             name=name,
             email=email,
             phone=None,
@@ -103,7 +100,7 @@ class UserService:
         return db_user
 
     @staticmethod
-    def update_gmail_token(db: Session, user_id: str, refresh_token: str) -> User:
+    def update_gmail_token(db: Session, user_id: int, refresh_token: str) -> User:
         user = UserService.get_user_by_id(db, user_id)
         if user:
             user.gmail_connected = True

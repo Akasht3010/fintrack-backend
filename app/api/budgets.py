@@ -41,7 +41,7 @@ async def list_budgets(
 
 @router.patch("/{budget_id}", response_model=BudgetResponse)
 async def update_budget(
-    budget_id: str,
+    budget_id: int,
     update: BudgetUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -56,7 +56,7 @@ async def update_budget(
 
 @router.delete("/{budget_id}")
 async def delete_budget(
-    budget_id: str,
+    budget_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

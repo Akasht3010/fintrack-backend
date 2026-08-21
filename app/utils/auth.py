@@ -38,21 +38,27 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire})
+    # PyJWT enforces RFC 7519's "sub is a StringOrURI" rule and raises
+    # InvalidSubjectError decoding a token whose sub isn't a string — every
+    # caller here passes the integer user id, so it has to be stringified
+    # before encoding (and parsed back to int wherever it's read below).
+    if "sub" in to_encode:
+        to_encode["sub"] = str(to_encode["sub"])
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def verify_token(token: str):
+def verify_token(token: str) -> Optional[int]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
+        sub = payload.get("sub")
+        if sub is None:
             return None
-        return user_id
-    except jwt.InvalidTokenError:
+        return int(sub)
+    except (jwt.InvalidTokenError, ValueError):
         return None
 
 
-def create_pending_token(user_id: str, purpose: str) -> str:
+def create_pending_token(user_id: int, purpose: str) -> str:
     """A short-lived token identifying a user who passed the password check but
     hasn't completed OTP verification yet — deliberately separate from a real
     access token so it can't be used to call authenticated routes."""
@@ -66,17 +72,19 @@ def decode_pending_token(token: str) -> Optional[dict]:
     """Like verify_pending_token, but doesn't require knowing the purpose up
     front — used by /resend-otp, which serves both the login and
     password-reset flows and just needs to reissue a code for whichever
-    purpose the token was already scoped to."""
+    purpose the token was already scoped to. `sub` is parsed back to int
+    here (see create_access_token) so every caller gets a real user id."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if not payload.get("sub") or not payload.get("purpose"):
             return None
+        payload["sub"] = int(payload["sub"])
         return payload
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, ValueError):
         return None
 
 
-def verify_pending_token(token: str, purpose: str) -> Optional[str]:
+def verify_pending_token(token: str, purpose: str) -> Optional[int]:
     payload = decode_pending_token(token)
     if not payload or payload.get("purpose") != purpose:
         return None
@@ -88,7 +96,7 @@ def get_current_user(
 ) -> User:
     """FastAPI dependency: resolves the bearer token to the authenticated User, or 401s."""
     user_id = verify_token(credentials.credentials)
-    if not user_id:
+    if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     user = db.query(User).filter(User.id == user_id).first()

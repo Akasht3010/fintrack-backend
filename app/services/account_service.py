@@ -35,18 +35,18 @@ def compute_balance(db: Session, account: Account) -> float:
 
 class AccountService:
     @staticmethod
-    def list_visible(db: Session, user_id: str, include_archived: bool = False) -> list[Account]:
+    def list_visible(db: Session, user_id: int, include_archived: bool = False) -> list[Account]:
         query = db.query(Account).filter(Account.user_id == user_id)
         if not include_archived:
             query = query.filter(Account.is_archived.is_(False))
         return query.order_by(Account.created_at).all()
 
     @staticmethod
-    def get_own(db: Session, user_id: str, account_id: str) -> Account | None:
+    def get_own(db: Session, user_id: int, account_id: int) -> Account | None:
         return db.query(Account).filter(Account.id == account_id, Account.user_id == user_id).first()
 
     @staticmethod
-    def create(db: Session, user_id: str, name: str, type: str, currency: str, opening_balance: float) -> Account:
+    def create(db: Session, user_id: int, name: str, type: str, currency: str, opening_balance: float) -> Account:
         account = Account(
             user_id=user_id, name=name.strip(), type=type,
             currency=currency, opening_balance=opening_balance
@@ -93,7 +93,7 @@ class AccountService:
         }
 
     @staticmethod
-    def net_worth(db: Session, user_id: str) -> dict:
+    def net_worth(db: Session, user_id: int) -> dict:
         """
         Each account's own `balance` stays in that account's native
         currency (matches how it's displayed). The combined totals below

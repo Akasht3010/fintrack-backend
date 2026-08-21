@@ -31,7 +31,7 @@ async def create_category(
 
 @router.patch("/{category_id}", response_model=CategoryResponse)
 async def update_category(
-    category_id: str,
+    category_id: int,
     payload: CategoryUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -48,7 +48,7 @@ async def update_category(
 
 @router.delete("/{category_id}")
 async def delete_category(
-    category_id: str,
+    category_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

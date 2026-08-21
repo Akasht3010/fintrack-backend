@@ -12,7 +12,7 @@ class CategoryUpdate(BaseModel):
     icon: Optional[str] = Field(default=None, max_length=8)
 
 class CategoryResponse(BaseModel):
-    id: str
+    id: int
     name: str
     icon: str
     is_default: bool

@@ -18,7 +18,7 @@ class CategoryInUseError(Exception):
 
 class CategoryService:
     @staticmethod
-    def list_visible(db: Session, user_id: str) -> list[Category]:
+    def list_visible(db: Session, user_id: int) -> list[Category]:
         """Default categories plus this user's own, defaults first in their original order."""
         return (
             db.query(Category)
@@ -28,7 +28,7 @@ class CategoryService:
         )
 
     @staticmethod
-    def name_exists(db: Session, user_id: str, name: str, exclude_id: str | None = None) -> bool:
+    def name_exists(db: Session, user_id: int, name: str, exclude_id: int | None = None) -> bool:
         query = db.query(Category).filter(
             or_(Category.user_id.is_(None), Category.user_id == user_id),
             func.lower(Category.name) == name.lower()
@@ -38,7 +38,7 @@ class CategoryService:
         return db.query(query.exists()).scalar()
 
     @staticmethod
-    def name_in_use(db: Session, user_id: str, name: str) -> bool:
+    def name_in_use(db: Session, user_id: int, name: str) -> bool:
         in_transactions = db.query(Transaction).filter(
             Transaction.user_id == user_id, Transaction.category == name
         ).first()
@@ -49,7 +49,7 @@ class CategoryService:
         ).first() is not None
 
     @staticmethod
-    def create(db: Session, user_id: str, name: str, icon: str) -> Category:
+    def create(db: Session, user_id: int, name: str, icon: str) -> Category:
         name = name.strip()
         if CategoryService.name_exists(db, user_id, name):
             raise DuplicateCategoryError()
@@ -61,7 +61,7 @@ class CategoryService:
         return category
 
     @staticmethod
-    def get_own(db: Session, user_id: str, category_id: str) -> Category | None:
+    def get_own(db: Session, user_id: int, category_id: int) -> Category | None:
         """Only ever matches a category this user created — defaults (user_id NULL) are never editable/deletable."""
         return db.query(Category).filter(Category.id == category_id, Category.user_id == user_id).first()
 

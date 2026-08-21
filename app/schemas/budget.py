@@ -14,8 +14,8 @@ class BudgetUpdate(BaseModel):
     limit_amount: float = Field(gt=0)
 
 class BudgetResponse(BudgetBase):
-    id: str
-    user_id: str
+    id: int
+    user_id: int
     spent_amount: float
     start_date: datetime
     end_date: datetime

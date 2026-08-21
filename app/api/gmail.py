@@ -25,7 +25,7 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
 CALLBACK_PATH = "/api/gmail/callback"
 
 
-def _encode_state(user_id: str, app_redirect_uri: str) -> str:
+def _encode_state(user_id: int, app_redirect_uri: str) -> str:
     payload = json.dumps({"user_id": user_id, "app_redirect_uri": app_redirect_uri})
     return base64.urlsafe_b64encode(payload.encode()).decode()
 

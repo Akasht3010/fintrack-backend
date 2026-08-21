@@ -22,7 +22,7 @@ class OtpError(Exception):
         self.status_code = status_code
 
 
-def _hash_code(code: str, user_id: str) -> str:
+def _hash_code(code: str, user_id: int) -> str:
     return hashlib.sha256(f"{user_id}:{code}".encode()).hexdigest()
 
 
@@ -67,7 +67,7 @@ def issue_otp(db: Session, user: User, purpose: str, background_tasks: Optional[
         send_otp_email(to_email=user.email, name=user.name, code=code)
 
 
-def verify_otp(db: Session, user_id: str, code: str, purpose: str) -> None:
+def verify_otp(db: Session, user_id: int, code: str, purpose: str) -> None:
     """Raises OtpError on any failure; returns normally on success (and marks
     the code consumed so it can't be replayed)."""
     otp = (

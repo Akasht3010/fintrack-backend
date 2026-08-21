@@ -17,7 +17,7 @@ class AccountUpdate(BaseModel):
     is_archived: Optional[bool] = None
 
 class AccountResponse(BaseModel):
-    id: str
+    id: int
     name: str
     type: AccountType
     currency: str
@@ -30,7 +30,7 @@ class AccountResponse(BaseModel):
         from_attributes = True
 
 class NetWorthAccountItem(BaseModel):
-    id: str
+    id: int
     name: str
     type: AccountType
     balance: float

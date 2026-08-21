@@ -15,7 +15,7 @@ class TransactionBase(BaseModel):
     date: datetime
     source: TransactionSource
     is_recurring: bool = False
-    account_id: Optional[str] = None
+    account_id: Optional[int] = None
 
 class TransactionCreate(TransactionBase):
     raw_text: Optional[str] = None
@@ -27,11 +27,11 @@ class TransactionUpdate(BaseModel):
     category: Optional[str] = None
     merchant: Optional[str] = None
     description: Optional[str] = None
-    account_id: Optional[str] = None
+    account_id: Optional[int] = None
 
 class TransactionResponse(TransactionBase):
-    id: str
-    user_id: str
+    id: int
+    user_id: int
     created_at: datetime
 
     class Config:

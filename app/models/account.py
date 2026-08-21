@@ -1,6 +1,5 @@
-from sqlalchemy import Column, String, Float, Boolean, DateTime, ForeignKey, func
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, func
 from app.config.database import Base
-import uuid
 
 # Accounts whose balance represents money owed rather than money held —
 # subtracted (not added) when computing net worth.
@@ -9,8 +8,8 @@ LIABILITY_TYPES = {"credit_card"}
 class Account(Base):
     __tablename__ = "accounts"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     type = Column(String, nullable=False)  # bank, cash, credit_card, wallet, investment
     currency = Column(String, default="INR")
