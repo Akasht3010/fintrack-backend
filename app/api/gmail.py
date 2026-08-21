@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from app.config.database import get_db
@@ -16,6 +15,7 @@ from app.services.categorizer import categorize_merchant
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.utils.auth import get_current_user, verify_token
+from app.utils.timezone import now_ist, to_ist_naive
 
 router = APIRouter(prefix="/api/gmail", tags=["gmail"])
 
@@ -148,14 +148,13 @@ async def sync_gmail_emails(
         try:
             email_date = parsedate_to_datetime(email["date"])
             # parsedate_to_datetime returns a tz-aware datetime carrying the
-            # sender's offset, but the `date` column is naive UTC (same as
+            # sender's offset, but the `date` column is naive IST (same as
             # every other source) — storing it as-is would skew this
             # transaction's date by that offset, corrupting budget-period
             # bucketing, monthly insights, and recurring-cadence detection.
-            if email_date.tzinfo is not None:
-                email_date = email_date.astimezone(timezone.utc).replace(tzinfo=None)
+            email_date = to_ist_naive(email_date)
         except Exception:
-            email_date = datetime.utcnow()
+            email_date = now_ist()
 
         # Some banks send multiple emails for the same underlying transaction
         # (e.g. a generic alert + a separate fee notice) with different

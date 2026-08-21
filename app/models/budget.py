@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, func
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
 from app.config.database import Base
-from datetime import datetime
+from app.utils.timezone import now_ist
 
 class Budget(Base):
     __tablename__ = "budgets"
@@ -13,7 +13,7 @@ class Budget(Base):
     period = Column(String, nullable=False)  # weekly, monthly
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=now_ist)
 
     def __repr__(self):
         return f"<Budget {self.category} {self.limit_amount}>"

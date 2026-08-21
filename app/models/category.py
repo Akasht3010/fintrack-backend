@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, func, UniqueConstraint
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, UniqueConstraint
 from app.config.database import Base
+from app.utils.timezone import now_ist
 
 class Category(Base):
     __tablename__ = "categories"
@@ -9,7 +10,7 @@ class Category(Base):
     name = Column(String, nullable=False)
     icon = Column(String, nullable=False, default="📌")
     sort_order = Column(Integer, nullable=True)  # only set on seeded defaults, to preserve their original order
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=now_ist)
 
     __table_args__ = (
         UniqueConstraint('user_id', 'name', name='uq_user_category_name'),

@@ -16,6 +16,9 @@ google-auth-oauthlib==1.2.0
 google-auth-httplib2==0.2.0
 google-api-python-client==2.107.0
 python-multipart==0.0.6
+# Bundles the IANA tz database so zoneinfo.ZoneInfo("Asia/Kolkata") resolves
+# reliably regardless of whether the deploy host's OS has tzdata installed.
+tzdata>=2024.1
 
 # Testing
 pytest>=8.0.0

@@ -11,6 +11,7 @@ from app.models.user import User
 from app.schemas.insights import CategoryBreakdownItem, InsightsSummary, MerchantBreakdownItem, MonthlyTotal
 from app.services.exchange_rate_service import to_home_currency
 from app.utils.auth import get_current_user
+from app.utils.timezone import now_ist
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
@@ -22,7 +23,7 @@ async def get_insights(
 ):
     """Spending trends for the authenticated user: monthly totals, this month's
     category breakdown, and top merchants over the requested range."""
-    now = datetime.utcnow()
+    now = now_ist()
 
     start_year = now.year
     start_month = now.month - (months - 1)

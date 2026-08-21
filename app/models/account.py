@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, func
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
 from app.config.database import Base
+from app.utils.timezone import now_ist
 
 # Accounts whose balance represents money owed rather than money held —
 # subtracted (not added) when computing net worth.
@@ -15,8 +16,8 @@ class Account(Base):
     currency = Column(String, default="INR")
     opening_balance = Column(Float, nullable=False, default=0)
     is_archived = Column(Boolean, default=False)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
     def __repr__(self):
         return f"<Account {self.name} ({self.type})>"

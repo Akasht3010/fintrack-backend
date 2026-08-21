@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, func
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey
 from app.config.database import Base
+from app.utils.timezone import now_ist
 
 
 class OtpCode(Base):
@@ -12,4 +13,4 @@ class OtpCode(Base):
     expires_at = Column(DateTime, nullable=False)
     attempts = Column(Integer, default=0, nullable=False)
     consumed = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, default=now_ist)

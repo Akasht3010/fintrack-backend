@@ -4,15 +4,10 @@
 --
 -- These are read-only views: they don't change the real tables or any
 -- stored value. Every timestamp column in the actual tables (date,
--- created_at, updated_at, ...) is deliberately stored as naive UTC -- that
--- convention is what every date comparison in the app code (budget
--- periods, OTP expiry, recurring-transaction detection, JWT expiry, etc.)
--- already assumes. Converting the *stored* values to IST would break all
--- of that arithmetic; converting them here, at display time, doesn't.
---
--- Each view below adds an `*_ist` column formatted as DD-MM-YYYY HH24:MI:SS
--- next to the raw UTC column, so you can eyeball the real IST time a row
--- was created/dated without touching how anything is actually stored.
+-- created_at, updated_at, start_date, end_date, ...) is stored as naive
+-- IST wall-clock time already -- these views just format it as
+-- DD-MM-YYYY HH24:MI:SS for easier reading. No timezone conversion
+-- happens here; the raw columns are already correct IST.
 
 CREATE OR REPLACE VIEW v_users AS
 SELECT
@@ -21,8 +16,8 @@ SELECT
     email,
     phone,
     gmail_connected,
-    to_char(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY HH24:MI:SS') AS created_at_ist,
-    to_char(updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY HH24:MI:SS') AS updated_at_ist
+    to_char(created_at, 'DD-MM-YYYY HH24:MI:SS') AS created_at_ist,
+    to_char(updated_at, 'DD-MM-YYYY HH24:MI:SS') AS updated_at_ist
 FROM users
 ORDER BY created_at DESC;
 
@@ -34,9 +29,9 @@ SELECT
     t.amount,
     t.type,
     t.category,
-    to_char(t.date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY HH24:MI:SS') AS date_ist,
+    to_char(t.date, 'DD-MM-YYYY HH24:MI:SS') AS date_ist,
     t.source,
-    to_char(t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY HH24:MI:SS') AS created_at_ist,
+    to_char(t.created_at, 'DD-MM-YYYY HH24:MI:SS') AS created_at_ist,
     t.user_id
 FROM transactions t
 JOIN users u ON u.id = t.user_id
@@ -50,7 +45,7 @@ SELECT
     a.type,
     a.opening_balance,
     a.is_archived,
-    to_char(a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY HH24:MI:SS') AS created_at_ist
+    to_char(a.created_at, 'DD-MM-YYYY HH24:MI:SS') AS created_at_ist
 FROM accounts a
 JOIN users u ON u.id = a.user_id
 ORDER BY a.created_at DESC;
@@ -63,9 +58,9 @@ SELECT
     b.limit_amount,
     b.spent_amount,
     b.period,
-    to_char(b.start_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY HH24:MI:SS') AS start_date_ist,
-    to_char(b.end_date AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY HH24:MI:SS') AS end_date_ist,
-    to_char(b.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'DD-MM-YYYY HH24:MI:SS') AS created_at_ist
+    to_char(b.start_date, 'DD-MM-YYYY HH24:MI:SS') AS start_date_ist,
+    to_char(b.end_date, 'DD-MM-YYYY HH24:MI:SS') AS end_date_ist,
+    to_char(b.created_at, 'DD-MM-YYYY HH24:MI:SS') AS created_at_ist
 FROM budgets b
 JOIN users u ON u.id = b.user_id
 ORDER BY b.created_at DESC;

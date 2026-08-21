@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, func, Index, text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Index, text
 from app.config.database import Base
-from datetime import datetime
+from app.utils.timezone import now_ist
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -18,8 +18,8 @@ class Transaction(Base):
     source = Column(String, nullable=False)  # gmail, manual, sms, aa
     raw_text = Column(String, nullable=True)
     is_recurring = Column(Boolean, default=False)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
     __table_args__ = (
         Index('idx_user_date', 'user_id', 'date'),

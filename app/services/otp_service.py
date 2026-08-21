@@ -1,7 +1,7 @@
 import hashlib
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 from fastapi import BackgroundTasks
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models.otp_code import OtpCode
 from app.models.user import User
 from app.services.email_service import send_otp_email
+from app.utils.timezone import now_ist
 
 OTP_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "30"))
@@ -46,7 +47,7 @@ def issue_otp(db: Session, user: User, purpose: str, background_tasks: Optional[
         .first()
     )
     if latest and latest.created_at:
-        elapsed = datetime.utcnow() - latest.created_at
+        elapsed = now_ist() - latest.created_at
         if elapsed < timedelta(seconds=OTP_RESEND_COOLDOWN_SECONDS):
             wait = OTP_RESEND_COOLDOWN_SECONDS - int(elapsed.total_seconds())
             raise OtpError(f"Please wait {wait}s before requesting another code", status_code=429)
@@ -56,7 +57,7 @@ def issue_otp(db: Session, user: User, purpose: str, background_tasks: Optional[
         user_id=user.id,
         purpose=purpose,
         code_hash=_hash_code(code, user.id),
-        expires_at=datetime.utcnow() + timedelta(minutes=OTP_EXPIRE_MINUTES),
+        expires_at=now_ist() + timedelta(minutes=OTP_EXPIRE_MINUTES),
     )
     db.add(otp)
     db.commit()
@@ -79,7 +80,7 @@ def verify_otp(db: Session, user_id: int, code: str, purpose: str) -> None:
     if not otp:
         raise OtpError("No pending verification code. Please request a new one.")
 
-    if datetime.utcnow() > otp.expires_at:
+    if now_ist() > otp.expires_at:
         raise OtpError("This code has expired. Please request a new one.")
 
     if otp.attempts >= MAX_OTP_ATTEMPTS:

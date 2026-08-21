@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, func
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from app.config.database import Base
-from datetime import datetime
+from app.utils.timezone import now_ist
 
 class User(Base):
     __tablename__ = "users"
@@ -16,8 +16,8 @@ class User(Base):
     google_id = Column(String, unique=True, nullable=True)
     gmail_connected = Column(Boolean, default=False)
     gmail_refresh_token = Column(String, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, default=now_ist)
+    updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
     def __repr__(self):
         return f"<User {self.email}>"

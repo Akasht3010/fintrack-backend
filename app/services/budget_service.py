@@ -6,6 +6,7 @@ import calendar
 from app.models.budget import Budget
 from app.models.transaction import Transaction
 from app.services.exchange_rate_service import to_home_currency
+from app.utils.timezone import now_ist
 
 
 class DuplicateBudgetError(Exception):
@@ -47,7 +48,7 @@ def compute_spent(db: Session, user_id: int, category: str, start_date: datetime
 class BudgetService:
     @staticmethod
     def create_budget(db: Session, user_id: int, category: str, limit_amount: float, period: str) -> Budget:
-        now = datetime.utcnow()
+        now = now_ist()
         start_date, end_date = current_period_dates(period, now)
 
         overlapping = db.query(Budget).filter(
@@ -75,7 +76,7 @@ class BudgetService:
 
     @staticmethod
     def list_active_budgets(db: Session, user_id: int) -> list[Budget]:
-        now = datetime.utcnow()
+        now = now_ist()
         return db.query(Budget).filter(
             Budget.user_id == user_id,
             Budget.start_date <= now,

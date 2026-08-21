@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -15,6 +15,7 @@ from app.models.user import User
 from app.services.account_service import AccountService
 from app.services.category_service import CategoryService
 from app.utils.auth import get_current_user
+from app.utils.timezone import now_ist, to_ist_naive
 
 def _ensure_category_exists(db: Session, user_id: int, category: str) -> None:
     if not CategoryService.name_exists(db, user_id, category):
@@ -43,9 +44,9 @@ def _apply_filters(
         like = f"%{q}%"
         query = query.filter(or_(Transaction.merchant.ilike(like), Transaction.description.ilike(like)))
     if date_from:
-        query = query.filter(Transaction.date >= date_from)
+        query = query.filter(Transaction.date >= to_ist_naive(date_from))
     if date_to:
-        query = query.filter(Transaction.date <= date_to)
+        query = query.filter(Transaction.date <= to_ist_naive(date_to))
     if min_amount is not None:
         query = query.filter(Transaction.amount >= min_amount)
     if max_amount is not None:
@@ -66,16 +67,15 @@ async def create_transaction(
     _ensure_category_exists(db, current_user.id, transaction.category)
     _ensure_account_owned(db, current_user.id, transaction.account_id)
 
-    # The `date` column is naive UTC (same convention as the Gmail/SMS sync
+    # The `date` column is naive IST (same convention as the Gmail/SMS sync
     # endpoints), but the client sends an offset-aware ISO string
     # (`new Date().toISOString()`). Handing that aware value straight to
     # the DB driver leaves the UTC-vs-local conversion up to the DB
     # session's own timezone setting instead of doing it explicitly here —
     # exactly the kind of implicit conversion that silently corrupts the
-    # stored instant if that setting is ever anything other than UTC.
-    transaction_date = transaction.date
-    if transaction_date.tzinfo is not None:
-        transaction_date = transaction_date.astimezone(timezone.utc).replace(tzinfo=None)
+    # stored instant if that setting is ever anything other than what's
+    # expected.
+    transaction_date = to_ist_naive(transaction.date)
 
     db_transaction = Transaction(
         user_id=current_user.id,
@@ -175,7 +175,7 @@ async def export_transactions(
         ])
     buffer.seek(0)
 
-    filename = f"fintrack-transactions-{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    filename = f"fintrack-transactions-{now_ist().strftime('%Y%m%d')}.csv"
     return StreamingResponse(
         iter([buffer.getvalue()]),
         media_type="text/csv",

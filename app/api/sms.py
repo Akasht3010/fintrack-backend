@@ -10,6 +10,7 @@ from app.schemas.sms import SmsSyncRequest, SmsSyncResponse
 from app.services.email_parser import parse_bank_email
 from app.services.categorizer import categorize_merchant
 from app.utils.auth import get_current_user
+from app.utils.timezone import IST
 
 router = APIRouter(prefix="/api/sms", tags=["sms"])
 
@@ -33,7 +34,7 @@ async def sync_sms_messages(
 
     for message in payload.messages:
         body = message.body or ""
-        sms_date = datetime.utcfromtimestamp(message.date / 1000)
+        sms_date = datetime.fromtimestamp(message.date / 1000, tz=IST).replace(tzinfo=None)
         marker = f"sms:{message.address}:{message.date}"
 
         already_exists = db.query(Transaction).filter(
