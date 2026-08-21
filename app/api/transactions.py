@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -66,6 +66,17 @@ async def create_transaction(
     _ensure_category_exists(db, current_user.id, transaction.category)
     _ensure_account_owned(db, current_user.id, transaction.account_id)
 
+    # The `date` column is naive UTC (same convention as the Gmail/SMS sync
+    # endpoints), but the client sends an offset-aware ISO string
+    # (`new Date().toISOString()`). Handing that aware value straight to
+    # the DB driver leaves the UTC-vs-local conversion up to the DB
+    # session's own timezone setting instead of doing it explicitly here —
+    # exactly the kind of implicit conversion that silently corrupts the
+    # stored instant if that setting is ever anything other than UTC.
+    transaction_date = transaction.date
+    if transaction_date.tzinfo is not None:
+        transaction_date = transaction_date.astimezone(timezone.utc).replace(tzinfo=None)
+
     db_transaction = Transaction(
         user_id=current_user.id,
         account_id=transaction.account_id,
@@ -75,7 +86,7 @@ async def create_transaction(
         category=transaction.category,
         merchant=transaction.merchant,
         description=transaction.description,
-        date=transaction.date,
+        date=transaction_date,
         source=transaction.source,
         raw_text=transaction.raw_text,
         is_recurring=transaction.is_recurring
