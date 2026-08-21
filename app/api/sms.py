@@ -34,7 +34,7 @@ async def sync_sms_messages(
 
     for message in payload.messages:
         body = message.body or ""
-        sms_date = datetime.fromtimestamp(message.date / 1000, tz=IST).replace(tzinfo=None)
+        sms_date = datetime.fromtimestamp(message.date / 1000, tz=IST).replace(tzinfo=None, microsecond=0)
         marker = f"sms:{message.address}:{message.date}"
 
         already_exists = db.query(Transaction).filter(

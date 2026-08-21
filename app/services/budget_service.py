@@ -18,13 +18,13 @@ def current_period_dates(period: str, now: datetime) -> tuple[datetime, datetime
     """Compute the start/end of the current week or month, containing `now`."""
     if period == "weekly":
         start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-        end = (start + timedelta(days=6)).replace(hour=23, minute=59, second=59, microsecond=999999)
+        end = (start + timedelta(days=6)).replace(hour=23, minute=59, second=59, microsecond=0)
         return start, end
 
     # monthly
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     last_day = calendar.monthrange(now.year, now.month)[1]
-    end = now.replace(day=last_day, hour=23, minute=59, second=59, microsecond=999999)
+    end = now.replace(day=last_day, hour=23, minute=59, second=59, microsecond=0)
     return start, end
 
 
