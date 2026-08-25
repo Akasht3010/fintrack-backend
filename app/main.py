@@ -9,7 +9,7 @@ from app.models.transaction import Transaction
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.account import Account
-from app.api import auth, transactions, budgets, google_auth, gmail, insights, recurring, categories, accounts, sms
+from app.api import auth, transactions, budgets, google_auth, gmail, insights, recurring, categories, accounts, sms, admin
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,6 +55,7 @@ app.include_router(recurring.router)
 app.include_router(categories.router)
 app.include_router(accounts.router)
 app.include_router(sms.router)
+app.include_router(admin.router)
 
 @app.get("/health")
 async def health_check():
