@@ -57,8 +57,10 @@ app.include_router(accounts.router)
 app.include_router(sms.router)
 app.include_router(admin.router)
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
+    # HEAD too: uptime monitors (UptimeRobot etc.) default to HEAD checks to
+    # avoid pulling a response body just to confirm liveness.
     return {"status": "ok", "version": "1.0.0"}
 
 if __name__ == "__main__":
