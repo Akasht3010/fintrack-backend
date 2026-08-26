@@ -65,6 +65,25 @@ def get_stats(db: Session) -> dict:
     new_30d = db.query(func.count(User.id)).filter(User.created_at >= month_ago).scalar()
     gmail_connected = db.query(func.count(User.id)).filter(User.gmail_connected == True).scalar()  # noqa: E712
 
+    # "Active" = actually used the app recently (added a transaction), not just
+    # holds an account — created_at is when the row was recorded, so this
+    # tracks real activity rather than a transaction's own (possibly backdated) date.
+    active_7d = (
+        db.query(func.count(func.distinct(Transaction.user_id)))
+        .filter(Transaction.created_at >= week_ago)
+        .scalar()
+    )
+
+    # Signed up more than a week ago (past the grace period a brand-new user
+    # deserves) and never logged a single transaction — a churn/onboarding-drop signal.
+    users_with_any_transaction = db.query(Transaction.user_id).distinct().subquery()
+    dead_signups = (
+        db.query(func.count(User.id))
+        .filter(User.created_at < week_ago)
+        .filter(~User.id.in_(db.query(users_with_any_transaction.c.user_id)))
+        .scalar()
+    )
+
     total_transactions = db.query(func.count(Transaction.id)).scalar()
     transactions_today = (
         db.query(func.count(Transaction.id)).filter(Transaction.created_at >= today_start).scalar()
@@ -81,6 +100,8 @@ def get_stats(db: Session) -> dict:
             "new_7d": new_7d,
             "new_30d": new_30d,
             "gmail_connected": gmail_connected,
+            "active_7d": active_7d,
+            "dead_signups": dead_signups,
         },
         "transactions": {
             "total": total_transactions,

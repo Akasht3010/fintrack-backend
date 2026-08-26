@@ -23,6 +23,8 @@ class UserStats(BaseModel):
     new_7d: int
     new_30d: int
     gmail_connected: int
+    active_7d: int
+    dead_signups: int
 
 
 class TransactionStats(BaseModel):
