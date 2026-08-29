@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config.database import Base, engine
-from app.config.init_db import migrate_schema, seed_default_categories
+from app.config.init_db import migrate_schema, seed_default_categories, encrypt_plaintext_gmail_tokens
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.models.budget import Budget
@@ -17,6 +17,7 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     migrate_schema()
     seed_default_categories()
+    encrypt_plaintext_gmail_tokens()
     yield
     print("🛑 FastAPI shutting down")
 

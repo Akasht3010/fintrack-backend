@@ -21,9 +21,20 @@ def _ensure_category_exists(db: Session, user_id: int, category: str) -> None:
     if not CategoryService.name_exists(db, user_id, category):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown category '{category}'")
 
-def _ensure_account_owned(db: Session, user_id: int, account_id: Optional[int]) -> None:
-    if account_id is not None and not AccountService.get_own(db, user_id, account_id):
+def _ensure_account_owned(db: Session, user_id: int, account_id: Optional[int], currency: Optional[str] = None) -> None:
+    if account_id is None:
+        return
+    account = AccountService.get_own(db, user_id, account_id)
+    if not account:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown account '{account_id}'")
+    # compute_balance sums a linked account's transactions in the account's
+    # own currency without converting — a mismatched transaction currency
+    # would silently corrupt that account's balance rather than erroring here.
+    if currency is not None and currency != account.currency:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Transaction currency '{currency}' doesn't match account '{account.name}' (currency '{account.currency}')"
+        )
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -65,7 +76,7 @@ async def create_transaction(
 ):
     """Create a new transaction for the authenticated user"""
     _ensure_category_exists(db, current_user.id, transaction.category)
-    _ensure_account_owned(db, current_user.id, transaction.account_id)
+    _ensure_account_owned(db, current_user.id, transaction.account_id, transaction.currency)
 
     # The `date` column is naive IST (same convention as the Gmail/SMS sync
     # endpoints), but the client sends an offset-aware ISO string
@@ -221,8 +232,10 @@ async def update_transaction(
     updates = update.model_dump(exclude_unset=True)
     if "category" in updates:
         _ensure_category_exists(db, current_user.id, updates["category"])
-    if "account_id" in updates:
-        _ensure_account_owned(db, current_user.id, updates["account_id"])
+    if "account_id" in updates or "currency" in updates:
+        effective_account_id = updates.get("account_id", transaction.account_id)
+        effective_currency = updates.get("currency", transaction.currency)
+        _ensure_account_owned(db, current_user.id, effective_account_id, effective_currency)
 
     for field, value in updates.items():
         setattr(transaction, field, value)

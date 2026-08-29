@@ -22,6 +22,7 @@ from app.models.budget import Budget
 from app.models.account import Account
 from app.models.category import Category
 from app.models.otp_code import OtpCode
+from app.utils.crypto import decrypt
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -340,7 +341,7 @@ async def delete_current_user(
     """Permanently delete the authenticated user's account and all their data. Irreversible."""
     if current_user.gmail_refresh_token:
         try:
-            gmail_service.revoke_token(current_user.gmail_refresh_token)
+            gmail_service.revoke_token(decrypt(current_user.gmail_refresh_token))
         except Exception:
             pass
 

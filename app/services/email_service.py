@@ -10,6 +10,10 @@ SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 SMTP_FROM = os.getenv("SMTP_FROM") or SMTP_USER or "noreply@fintrack.local"
 OTP_EXPIRE_MINUTES = os.getenv("OTP_EXPIRE_MINUTES", "5")
+# Defaults to "production" (the strict setting) when unset, not "development"
+# (the permissive one) — a deploy that forgot to set ENV should fail loud on
+# a missing SMTP config, not silently start printing live 2FA codes to logs.
+ENV = os.getenv("ENV", "production")
 
 # Outcome of the last real send attempt — not a synthetic ping. OTP emails
 # are often sent from a BackgroundTask (see otp_service.issue_otp), where an
@@ -24,11 +28,19 @@ def get_smtp_status() -> dict:
 
 
 def send_otp_email(to_email: str, name: str, code: str) -> None:
-    """Send a login OTP by email. Falls back to printing the code when SMTP
-    isn't configured, so the flow is testable before a real mailbox is wired up."""
+    """Send a login OTP by email. Falls back to printing the code only when
+    ENV is explicitly "development", so the flow is testable before a real
+    mailbox is wired up — a misconfigured production deploy (one missing
+    SMTP env var) raises instead of silently writing live 2FA codes to logs
+    that are often shipped to a third-party aggregator."""
     if not SMTP_HOST or not SMTP_USER or not SMTP_PASSWORD:
-        print(f"\n\U0001F4E7 [DEV] No SMTP configured — OTP for {to_email}: {code}\n")
-        return
+        if ENV == "development":
+            print(f"\n\U0001F4E7 [DEV] No SMTP configured — OTP for {to_email}: {code}\n")
+            return
+        raise RuntimeError(
+            "SMTP is not configured (SMTP_HOST/SMTP_USER/SMTP_PASSWORD) and ENV is "
+            f"{ENV!r}, not 'development' — refusing to silently drop or log a login OTP."
+        )
 
     subject = "Your FinTrack verification code"
     body = (

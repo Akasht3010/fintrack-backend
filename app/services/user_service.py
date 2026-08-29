@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.schemas.user import UserCreate
 from app.utils.auth import hash_password
+from app.utils.crypto import encrypt
 import re
 
 
@@ -104,7 +105,7 @@ class UserService:
         user = UserService.get_user_by_id(db, user_id)
         if user:
             user.gmail_connected = True
-            user.gmail_refresh_token = refresh_token
+            user.gmail_refresh_token = encrypt(refresh_token)
             db.commit()
             db.refresh(user)
         return user

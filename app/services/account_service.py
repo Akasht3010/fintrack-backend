@@ -5,12 +5,32 @@ from sqlalchemy.orm import Session
 
 from app.models.account import LIABILITY_TYPES, Account
 from app.models.transaction import Transaction
-from app.services.exchange_rate_service import to_home_currency
+from app.services.exchange_rate_service import get_rate, to_home_currency
 
 
 class AccountInUseError(Exception):
     """Raised when deleting an account still referenced by a transaction."""
     pass
+
+
+def _sum_in_account_currency(db: Session, account: Account, transaction_type: str) -> float:
+    """
+    Grouped-and-converted like compute_spent, not a plain SUM — the API
+    enforces transaction.currency == account.currency at creation/update
+    time, but this stays defensive for any pre-existing data from before
+    that check existed. Converts into the *account's* own currency (not the
+    app's home currency) since that's what compute_balance's callers expect
+    back; net_worth() does the home-currency conversion itself afterward.
+    """
+    rows = db.query(Transaction.currency, func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
+        Transaction.account_id == account.id, Transaction.type == transaction_type
+    ).group_by(Transaction.currency).all()
+
+    today = date.today()
+    return sum(
+        float(total or 0.0) * get_rate(currency, today, account.currency)
+        for currency, total in rows
+    )
 
 
 def compute_balance(db: Session, account: Account) -> float:
@@ -20,13 +40,8 @@ def compute_balance(db: Session, account: Account) -> float:
     a purchase (debit) increases what's owed, a payment (credit) reduces it —
     so the terms flip: opening_balance + debits - credits.
     """
-    credits = db.query(func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
-        Transaction.account_id == account.id, Transaction.type == "credit"
-    ).scalar()
-    debits = db.query(func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
-        Transaction.account_id == account.id, Transaction.type == "debit"
-    ).scalar()
-    credits, debits = float(credits or 0.0), float(debits or 0.0)
+    credits = _sum_in_account_currency(db, account, "credit")
+    debits = _sum_in_account_currency(db, account, "debit")
 
     if account.type in LIABILITY_TYPES:
         return account.opening_balance + debits - credits

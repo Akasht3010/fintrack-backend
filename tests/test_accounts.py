@@ -109,3 +109,42 @@ def test_deleting_an_unused_account_succeeds(client, auth_headers):
     res = client.delete(f"/api/accounts/{account['id']}", headers=headers)
     assert res.status_code == 200
     assert client.get("/api/accounts", headers=headers).json() == []
+
+
+def test_create_transaction_rejects_currency_mismatch_with_its_account(client, auth_headers):
+    """A transaction's currency has to match its account's — compute_balance
+    sums a linked account's transactions in the account's own currency
+    without converting, so a mismatch would otherwise silently corrupt it."""
+    headers, _ = auth_headers
+    account = client.post("/api/accounts", json={
+        "name": "USD Card", "type": "credit_card", "currency": "USD", "opening_balance": 0
+    }, headers=headers).json()
+
+    res = client.post("/api/transactions", json={
+        "amount": 100.0, "currency": "INR", "type": "debit", "category": "shopping",
+        "merchant": "Amazon", "description": "order", "date": "2026-08-01T12:00:00",
+        "source": "manual", "account_id": account["id"]
+    }, headers=headers)
+    assert res.status_code == 400
+    assert "currency" in res.json()["detail"].lower()
+
+
+def test_update_transaction_rejects_currency_mismatch_with_its_account(client, auth_headers):
+    headers, _ = auth_headers
+    usd_account = client.post("/api/accounts", json={
+        "name": "USD Card", "type": "credit_card", "currency": "USD", "opening_balance": 0
+    }, headers=headers).json()
+    inr_account = client.post("/api/accounts", json={
+        "name": "INR Bank", "type": "bank", "currency": "INR", "opening_balance": 0
+    }, headers=headers).json()
+    transaction = client.post("/api/transactions", json={
+        "amount": 100.0, "currency": "INR", "type": "debit", "category": "shopping",
+        "merchant": "Amazon", "description": "order", "date": "2026-08-01T12:00:00",
+        "source": "manual", "account_id": inr_account["id"]
+    }, headers=headers).json()
+
+    res = client.patch(f"/api/transactions/{transaction['id']}", json={
+        "account_id": usd_account["id"]
+    }, headers=headers)
+    assert res.status_code == 400
+    assert "currency" in res.json()["detail"].lower()

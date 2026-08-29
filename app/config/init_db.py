@@ -1,3 +1,5 @@
+import os
+
 from app.config.database import Base, engine, SessionLocal
 from app.models.user import User
 from app.models.transaction import Transaction
@@ -5,6 +7,7 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.account import Account
 from app.models.otp_code import OtpCode
+from app.utils.crypto import decrypt, encrypt
 from sqlalchemy import inspect, text
 
 # Order matches the categories this app shipped with before custom
@@ -43,6 +46,31 @@ def seed_default_categories():
         db.commit()
     finally:
         db.close()
+
+def encrypt_plaintext_gmail_tokens():
+    """One-time-per-token cleanup: any gmail_refresh_token stored before
+    encryption-at-rest was added is still plaintext. Idempotent and
+    self-healing — a token that already decrypts successfully is left
+    alone, so this is safe to run on every startup. No-ops entirely until
+    ENCRYPTION_KEY is actually set, so deploying this code doesn't require
+    the env var to exist yet."""
+    if not os.getenv("ENCRYPTION_KEY"):
+        return
+
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.gmail_refresh_token.isnot(None)).all()
+        for user in users:
+            try:
+                decrypt(user.gmail_refresh_token)
+                continue  # already encrypted
+            except Exception:
+                pass
+            user.gmail_refresh_token = encrypt(user.gmail_refresh_token)
+        db.commit()
+    finally:
+        db.close()
+
 
 def migrate_schema():
     """
@@ -100,6 +128,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     migrate_schema()
     seed_default_categories()
+    encrypt_plaintext_gmail_tokens()
 
     # Verify tables were created
     inspector = inspect(engine)

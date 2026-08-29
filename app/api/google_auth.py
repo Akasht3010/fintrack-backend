@@ -16,6 +16,7 @@ from google.auth.transport import requests as google_requests
 from app.config.database import get_db
 from app.services.user_service import UserService
 from app.utils.auth import create_access_token
+from app.utils.oauth_state import create_state, consume_state
 
 router = APIRouter(prefix="/api/auth/google", tags=["google-auth"])
 
@@ -51,18 +52,20 @@ def _build_flow() -> Flow:
 async def google_authorize(app_redirect_uri: str = Query(...)):
     """
     Kicks off Google's OAuth consent flow. The app passes its own (dynamic,
-    per-session) deep link as `app_redirect_uri`; we thread it through
-    Google's `state` param so /callback knows where to send the user back
-    afterwards, since the app's URL isn't something Google can be told about
-    ahead of time (it changes every Expo Go session).
+    per-session) deep link as `app_redirect_uri`; rather than sending that
+    straight to Google as `state` (client-controlled and forgeable — an
+    attacker could substitute their own redirect and have our callback
+    hand them a freshly-minted JWT for whoever completes consent), we mint
+    a random nonce bound server-side to it and send only the nonce.
     """
     _require_configured()
 
+    state = create_state({"app_redirect_uri": app_redirect_uri})
     flow = _build_flow()
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
-        state=app_redirect_uri
+        state=state
     )
     return RedirectResponse(auth_url)
 
@@ -74,10 +77,14 @@ async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     Google Cloud Console as an authorized redirect URI). We exchange the
     code server-side, verify the identity token, find-or-create the user,
     mint our own JWT, and bounce the browser back to the app's deep link
-    (captured earlier in `state`) with that token attached.
+    (recovered from the nonce `/authorize` created) with that token attached.
     """
-    _require_configured()
+    pending = consume_state(state)
+    if pending is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    app_redirect_uri = pending["app_redirect_uri"]
 
+    _require_configured()
     flow = _build_flow()
     flow.fetch_token(code=code)
     credentials = flow.credentials
@@ -98,5 +105,5 @@ async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
 
     access_token = create_access_token(data={"sub": user.id})
 
-    separator = "&" if "?" in state else "?"
-    return RedirectResponse(f"{state}{separator}token={access_token}")
+    separator = "&" if "?" in app_redirect_uri else "?"
+    return RedirectResponse(f"{app_redirect_uri}{separator}token={access_token}")

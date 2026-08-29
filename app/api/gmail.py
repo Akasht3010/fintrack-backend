@@ -1,5 +1,3 @@
-import base64
-import json
 import os
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
@@ -15,6 +13,8 @@ from app.services.categorizer import categorize_merchant
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.utils.auth import get_current_user, verify_token
+from app.utils.crypto import decrypt
+from app.utils.oauth_state import create_state, consume_state
 from app.utils.timezone import now_ist, to_ist_naive
 
 router = APIRouter(prefix="/api/gmail", tags=["gmail"])
@@ -23,18 +23,6 @@ gmail_service = GmailService()
 
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
 CALLBACK_PATH = "/api/gmail/callback"
-
-
-def _encode_state(user_id: int, app_redirect_uri: str) -> str:
-    payload = json.dumps({"user_id": user_id, "app_redirect_uri": app_redirect_uri})
-    return base64.urlsafe_b64encode(payload.encode()).decode()
-
-
-def _decode_state(state: str) -> dict:
-    try:
-        return json.loads(base64.urlsafe_b64decode(state.encode()).decode())
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid state")
 
 
 @router.get("/authorize")
@@ -47,7 +35,11 @@ async def gmail_authorize(
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    state = _encode_state(user_id, app_redirect_uri)
+    # user_id and app_redirect_uri are bound server-side to a random nonce
+    # rather than round-tripped through the client-decodable `state` blob —
+    # the old base64-JSON `state` was forgeable, so a crafted callback could
+    # attach an attacker's Gmail grant to an arbitrary victim's user_id.
+    state = create_state({"user_id": user_id, "app_redirect_uri": app_redirect_uri})
     auth_url = gmail_service.get_auth_url(f"{PUBLIC_BASE_URL}{CALLBACK_PATH}", state)
     return RedirectResponse(auth_url)
 
@@ -55,9 +47,11 @@ async def gmail_authorize(
 @router.get("/callback")
 async def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
     """Google redirects here after Gmail consent. Exchange the code, save the refresh token, bounce back to the app."""
-    decoded = _decode_state(state)
-    user_id = decoded["user_id"]
-    app_redirect_uri = decoded["app_redirect_uri"]
+    pending = consume_state(state)
+    if pending is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    user_id = pending["user_id"]
+    app_redirect_uri = pending["app_redirect_uri"]
 
     try:
         refresh_token = gmail_service.exchange_code_for_token(code, f"{PUBLIC_BASE_URL}{CALLBACK_PATH}")
@@ -79,7 +73,7 @@ async def gmail_disconnect(
     """Disconnect Gmail: best-effort revoke with Google, then clear the stored token either way."""
     if current_user.gmail_refresh_token:
         try:
-            gmail_service.revoke_token(current_user.gmail_refresh_token)
+            gmail_service.revoke_token(decrypt(current_user.gmail_refresh_token))
         except Exception:
             pass
 
@@ -99,7 +93,7 @@ async def sync_gmail_emails(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Gmail not connected")
 
     try:
-        emails = gmail_service.search_bank_emails(current_user.gmail_refresh_token)
+        emails = gmail_service.search_bank_emails(decrypt(current_user.gmail_refresh_token))
     except Exception as e:
         # Google expires refresh tokens after 7 days for OAuth apps still in
         # "Testing" publishing status (ours is, pending verification) — this
