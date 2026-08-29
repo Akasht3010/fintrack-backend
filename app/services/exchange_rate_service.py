@@ -1,3 +1,4 @@
+import time
 from datetime import date
 
 import httpx
@@ -15,6 +16,14 @@ FRANKFURTER_URL = "https://api.frankfurter.dev/v1"
 # restart, which is fine: a personal expense tracker doesn't need this
 # durable, just fast on the common path.
 _rate_cache: dict[tuple[str, str, date], float] = {}
+
+# Outcome of the last real Frankfurter call — distinct from the cache above,
+# since a cache hit never tells you whether the API is currently reachable.
+_last_status: dict = {"ok": None, "checked_at": None, "error": None}
+
+
+def get_fx_status() -> dict:
+    return dict(_last_status)
 
 
 def get_rate(from_currency: str, on_date: date | None = None, to_currency: str = HOME_CURRENCY) -> float:
@@ -44,8 +53,10 @@ def get_rate(from_currency: str, on_date: date | None = None, to_currency: str =
         )
         response.raise_for_status()
         rate = float(response.json()["rates"][to_currency])
-    except Exception:
+        _last_status.update({"ok": True, "checked_at": time.time(), "error": None})
+    except Exception as e:
         rate = 1.0
+        _last_status.update({"ok": False, "checked_at": time.time(), "error": str(e)})
 
     _rate_cache[cache_key] = rate
     return rate
