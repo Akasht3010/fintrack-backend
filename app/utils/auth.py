@@ -50,6 +50,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 def verify_token(token: str) -> Optional[int]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # Pending tokens (see create_pending_token) carry a "purpose" claim
+        # and are scoped to the OTP-verification endpoints only — without
+        # this check they decode identically to a real access token and
+        # authenticate against every protected route, skipping OTP entirely.
+        if payload.get("purpose") is not None:
+            return None
         sub = payload.get("sub")
         if sub is None:
             return None

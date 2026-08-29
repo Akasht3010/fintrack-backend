@@ -117,6 +117,31 @@ def test_get_me_requires_authentication(client):
     assert res.status_code in (401, 403)
 
 
+def test_pending_token_cannot_authenticate_protected_routes(client, signup, captured_otp):
+    """Regression test for a full auth bypass: a pending token (issued after
+    step 1 of login, or after forgot-password with nothing but an email/phone
+    — no password) must not work as a real access token. Mirrors the exact
+    exploit: forgot-password with only an identifier, then try the returned
+    pending_token against a protected route."""
+    _, user = signup(email="ivan@example.com", phone="9876543210", password="TestPass123!")
+
+    forgot_res = client.post("/api/auth/forgot-password", json={"identifier": "ivan@example.com"})
+    assert forgot_res.status_code == 200, forgot_res.text
+    pending_token = forgot_res.json()["pending_token"]
+
+    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {pending_token}"})
+    assert me_res.status_code == 401
+
+    delete_res = client.delete("/api/auth/me", headers={"Authorization": f"Bearer {pending_token}"})
+    assert delete_res.status_code == 401
+
+    # The account must still exist — the bypass, if present, would have let
+    # the delete above actually go through.
+    login_res = client.post("/api/auth/login", json={"identifier": "ivan@example.com", "password": "TestPass123!"})
+    assert login_res.status_code == 200
+    assert "pending_token" in login_res.json()
+
+
 def test_get_me_rejects_garbage_token(client):
     res = client.get("/api/auth/me", headers={"Authorization": "Bearer not-a-real-token"})
     assert res.status_code == 401
