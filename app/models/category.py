@@ -9,6 +9,9 @@ class Category(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # NULL = built-in default, visible to everyone
     name = Column(String, nullable=False)
     icon = Column(String, nullable=False, default="📌")
+    # "expense" or "income" restrict the category to that transaction type's
+    # picker; "both" (used by transfer/other) shows up for either.
+    type = Column(String, nullable=False, default="expense")
     sort_order = Column(Integer, nullable=True)  # only set on seeded defaults, to preserve their original order
     created_at = Column(DateTime, default=now_ist)
 

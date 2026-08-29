@@ -18,14 +18,14 @@ class CategoryInUseError(Exception):
 
 class CategoryService:
     @staticmethod
-    def list_visible(db: Session, user_id: int) -> list[Category]:
-        """Default categories plus this user's own, defaults first in their original order."""
-        return (
-            db.query(Category)
-            .filter(or_(Category.user_id.is_(None), Category.user_id == user_id))
-            .order_by(Category.sort_order.is_(None), Category.sort_order, Category.created_at)
-            .all()
-        )
+    def list_visible(db: Session, user_id: int, type: str | None = None) -> list[Category]:
+        """Default categories plus this user's own, defaults first in their original order.
+        Pass type="expense"/"income" to also restrict to that type plus "both"
+        (transfer/other) — omit it to get every category regardless of type."""
+        query = db.query(Category).filter(or_(Category.user_id.is_(None), Category.user_id == user_id))
+        if type is not None:
+            query = query.filter(Category.type.in_([type, "both"]))
+        return query.order_by(Category.sort_order.is_(None), Category.sort_order, Category.created_at).all()
 
     @staticmethod
     def name_exists(db: Session, user_id: int, name: str, exclude_id: int | None = None) -> bool:
@@ -49,12 +49,12 @@ class CategoryService:
         ).first() is not None
 
     @staticmethod
-    def create(db: Session, user_id: int, name: str, icon: str) -> Category:
+    def create(db: Session, user_id: int, name: str, icon: str, type: str = "expense") -> Category:
         name = name.strip()
         if CategoryService.name_exists(db, user_id, name):
             raise DuplicateCategoryError()
 
-        category = Category(user_id=user_id, name=name, icon=icon or "📌")
+        category = Category(user_id=user_id, name=name, icon=icon or "📌", type=type)
         db.add(category)
         db.commit()
         db.refresh(category)
@@ -66,7 +66,7 @@ class CategoryService:
         return db.query(Category).filter(Category.id == category_id, Category.user_id == user_id).first()
 
     @staticmethod
-    def update(db: Session, category: Category, name: str | None, icon: str | None) -> Category:
+    def update(db: Session, category: Category, name: str | None, icon: str | None, type: str | None = None) -> Category:
         if name is not None:
             name = name.strip()
             if CategoryService.name_exists(db, category.user_id, name, exclude_id=category.id):
@@ -84,6 +84,9 @@ class CategoryService:
 
         if icon is not None:
             category.icon = icon
+
+        if type is not None:
+            category.type = type
 
         db.commit()
         db.refresh(category)
