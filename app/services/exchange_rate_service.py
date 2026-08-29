@@ -8,6 +8,13 @@ import httpx
 # can be in whatever currency they were actually made in.
 HOME_CURRENCY = "INR"
 
+# Mirrors src/constants/currencies.ts on the frontend — a deliberately short
+# list of currencies people actually hold accounts/cards in, not full ISO
+# 4217 coverage. Keeping the two lists in sync is manual; update both
+# together. An unsupported code would otherwise store fine but silently
+# fail every FX conversion it touches (falling back to 1.0 / last-known-good).
+SUPPORTED_CURRENCIES = ("INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD", "JPY")
+
 FRANKFURTER_URL = "https://api.frankfurter.dev/v1"
 
 # Keyed by (from_currency, to_currency, date) — rates don't change intraday

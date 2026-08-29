@@ -18,10 +18,34 @@ def test_create_transaction(client, auth_headers):
     assert body["category"] == "food"
 
 
+def test_create_transaction_ignores_client_supplied_source_and_forces_manual(client, auth_headers):
+    """The gmail/sms sync paths never go through this endpoint, so anything
+    arriving here is manual by definition — a client claiming source="gmail"
+    would otherwise impersonate a higher-trust import."""
+    headers, payload = _make_txn(auth_headers, source="gmail")
+    res = client.post("/api/transactions", json=payload, headers=headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["source"] == "manual"
+
+
 def test_create_transaction_rejects_unknown_category(client, auth_headers):
     headers, payload = _make_txn(auth_headers, category="not-a-real-category")
     res = client.post("/api/transactions", json=payload, headers=headers)
     assert res.status_code == 400
+
+
+def test_create_transaction_rejects_zero_or_negative_amount(client, auth_headers):
+    headers, payload = _make_txn(auth_headers, amount=0)
+    assert client.post("/api/transactions", json=payload, headers=headers).status_code == 422
+
+    headers, payload = _make_txn(auth_headers, amount=-50)
+    assert client.post("/api/transactions", json=payload, headers=headers).status_code == 422
+
+
+def test_create_transaction_rejects_amount_over_the_ceiling(client, auth_headers):
+    headers, payload = _make_txn(auth_headers, amount=999_999_999)
+    res = client.post("/api/transactions", json=payload, headers=headers)
+    assert res.status_code == 422
 
 
 def test_create_transaction_rejects_account_owned_by_someone_else(client, auth_headers, signup):
@@ -115,3 +139,25 @@ def test_cannot_delete_another_users_transaction(client, auth_headers, signup):
     other_headers = {"Authorization": f"Bearer {other_token}"}
     res = client.delete(f"/api/transactions/{created['id']}", headers=other_headers)
     assert res.status_code == 404
+
+
+def test_csv_export_neutralizes_formula_injection_in_merchant_and_description(client, auth_headers):
+    """A merchant/description starting with =, +, -, or @ is interpreted as
+    a formula by Excel/Sheets when the exported CSV is opened — most
+    extraction patterns bound the captured text, but at least one doesn't,
+    so this must hold regardless of how the value got there."""
+    headers, payload = _make_txn(
+        auth_headers,
+        merchant="=cmd|'/c calc'!A1",
+        description="+1;DDE",
+    )
+    client.post("/api/transactions", json=payload, headers=headers)
+
+    res = client.get("/api/transactions/export", headers=headers)
+    assert res.status_code == 200
+    body = res.text
+    assert "'=cmd|'/c calc'!A1" in body
+    assert "'+1;DDE" in body
+    # The raw, unprefixed formula must never appear as its own cell.
+    assert ",=cmd" not in body
+    assert ",+1;DDE" not in body

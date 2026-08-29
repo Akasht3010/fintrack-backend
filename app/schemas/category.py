@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 CategoryType = str  # "expense" | "income" | "both" — validated with a pattern below, not a Literal, so old clients sending nothing still default cleanly
 
@@ -23,5 +23,4 @@ class CategoryResponse(BaseModel):
     is_default: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

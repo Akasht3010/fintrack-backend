@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import os
 import secrets
 from datetime import timedelta
@@ -86,7 +87,7 @@ def verify_otp(db: Session, user_id: int, code: str, purpose: str) -> None:
     if otp.attempts >= MAX_OTP_ATTEMPTS:
         raise OtpError("Too many incorrect attempts. Please request a new code.")
 
-    if otp.code_hash != _hash_code((code or "").strip(), user_id):
+    if not hmac.compare_digest(otp.code_hash, _hash_code((code or "").strip(), user_id)):
         otp.attempts += 1
         db.commit()
         raise OtpError("Incorrect code. Please try again.")

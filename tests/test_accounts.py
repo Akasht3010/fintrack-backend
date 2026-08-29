@@ -51,7 +51,7 @@ def test_credit_card_balance_moves_opposite_to_asset_accounts(client, auth_heade
 
 def test_net_worth_subtracts_credit_card_balance_from_bank_balance(client, auth_headers):
     headers, _ = auth_headers
-    bank = client.post("/api/accounts", json={
+    client.post("/api/accounts", json={
         "name": "Bank", "type": "bank", "currency": "INR", "opening_balance": 10000
     }, headers=headers).json()
     card = client.post("/api/accounts", json={

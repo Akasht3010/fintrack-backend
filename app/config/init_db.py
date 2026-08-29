@@ -2,11 +2,7 @@ import os
 
 from app.config.database import Base, engine, SessionLocal
 from app.models.user import User
-from app.models.transaction import Transaction
-from app.models.budget import Budget
 from app.models.category import Category
-from app.models.account import Account
-from app.models.otp_code import OtpCode
 from app.utils.crypto import decrypt, encrypt
 from sqlalchemy import inspect, text
 
@@ -88,7 +84,11 @@ def migrate_schema():
     columns = {col["name"] for col in inspector.get_columns("transactions")}
     if "account_id" not in columns:
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE transactions ADD COLUMN account_id VARCHAR"))
+            # Must match the model's Integer type — a Postgres DB that goes
+            # through this path (rather than a fresh create_all) would
+            # otherwise get a VARCHAR column, breaking account_id
+            # comparisons/filters against the real Integer FK values.
+            conn.execute(text("ALTER TABLE transactions ADD COLUMN account_id INTEGER"))
 
     if "users" in inspector.get_table_names():
         user_columns = {col["name"] for col in inspector.get_columns("users")}

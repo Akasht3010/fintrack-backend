@@ -21,6 +21,19 @@ def _ensure_category_exists(db: Session, user_id: int, category: str) -> None:
     if not CategoryService.name_exists(db, user_id, category):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown category '{category}'")
 
+_FORMULA_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+def _csv_safe(value: str) -> str:
+    """Neutralizes CSV/formula injection: a cell starting with =, +, -, @,
+    tab, or CR is interpreted as a formula by Excel/Sheets when opened. Most
+    merchant/description text is bounded by the extraction pattern that
+    produced it, but at least one (VPA_NAMED_PATTERN) captures an unbounded
+    character set, so this guards every string cell regardless of source
+    rather than trusting upstream validation."""
+    if value and value[0] in _FORMULA_INJECTION_PREFIXES:
+        return "'" + value
+    return value
+
 def _ensure_account_owned(db: Session, user_id: int, account_id: Optional[int], currency: Optional[str] = None) -> None:
     if account_id is None:
         return
@@ -98,7 +111,13 @@ async def create_transaction(
         merchant=transaction.merchant,
         description=transaction.description,
         date=transaction_date,
-        source=transaction.source,
+        # Forced server-side rather than trusting the client's `source` —
+        # the gmail/sms sync paths construct Transaction rows directly and
+        # never go through this endpoint, so anything arriving here is by
+        # definition manual. Without this, a client could label a
+        # hand-entered transaction "gmail"/"aa" and impersonate a
+        # higher-trust import.
+        source="manual",
         raw_text=transaction.raw_text,
         is_recurring=transaction.is_recurring
     )
@@ -177,11 +196,11 @@ async def export_transactions(
             t.type,
             t.amount,
             t.currency,
-            t.category,
-            t.merchant,
-            t.description,
+            _csv_safe(t.category),
+            _csv_safe(t.merchant),
+            _csv_safe(t.description),
             t.source,
-            account_names.get(t.account_id, ""),
+            _csv_safe(account_names.get(t.account_id, "")),
             "yes" if t.is_recurring else "no"
         ])
     buffer.seek(0)
