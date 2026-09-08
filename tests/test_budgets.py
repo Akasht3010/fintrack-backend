@@ -22,6 +22,35 @@ def test_create_budget_rejects_a_second_budget_for_the_same_category_and_overlap
     assert second.status_code == 409
 
 
+def test_expired_budget_does_not_block_a_new_one_for_the_same_category(client, auth_headers):
+    from datetime import datetime, timedelta
+    from app.config.database import SessionLocal
+    from app.models.budget import Budget
+
+    headers, user = auth_headers
+
+    # An old "food" budget whose period ended well before now — invisible to
+    # list_active_budgets, but under the old overlap check it could still
+    # 409 a fresh budget the user can't see to delete.
+    db = SessionLocal()
+    try:
+        past_end = datetime.utcnow() - timedelta(days=40)
+        db.add(Budget(
+            user_id=user["id"], category="food", limit_amount=1000, spent_amount=0,
+            period="monthly", start_date=past_end - timedelta(days=30), end_date=past_end
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    res = client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers)
+    assert res.status_code == 200, res.text
+
+    listed = client.get("/api/budgets", headers=headers).json()
+    assert len(listed) == 1
+    assert listed[0]["limit_amount"] == 5000
+
+
 def test_different_categories_can_each_have_a_budget(client, auth_headers):
     headers, _ = auth_headers
     food = client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers)

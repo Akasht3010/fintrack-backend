@@ -10,7 +10,7 @@ from app.utils.timezone import now_ist
 
 
 class DuplicateBudgetError(Exception):
-    """Raised when creating a budget that overlaps an existing one for the same category."""
+    """Raised when a budget for the same category + period is already active."""
     pass
 
 
@@ -51,13 +51,20 @@ class BudgetService:
         now = now_ist()
         start_date, end_date = current_period_dates(period, now)
 
-        overlapping = db.query(Budget).filter(
+        # Block only when a same-category, same-period budget is *currently
+        # active* — i.e. one that list_active_budgets would actually show.
+        # The old check rejected any date-range overlap regardless of period
+        # or whether the budget had already ended, so a long-expired weekly
+        # budget could still overlap this month's window and 409 a new
+        # monthly budget that the user could never see to delete.
+        existing = db.query(Budget).filter(
             Budget.user_id == user_id,
             Budget.category == category,
-            Budget.start_date <= end_date,
-            Budget.end_date >= start_date
+            Budget.period == period,
+            Budget.start_date <= now,
+            Budget.end_date >= now
         ).first()
-        if overlapping:
+        if existing:
             raise DuplicateBudgetError()
 
         budget = Budget(
