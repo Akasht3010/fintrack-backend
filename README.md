@@ -111,12 +111,17 @@ See **Google OAuth setup** below — this needs real credentials and, for local 
 `source` is one of `manual`, `gmail`, `sms`, `aa` (account aggregator). Imported rows carry a per-source dedup marker in `raw_text` (`gmail:<id>`, `sms:<address>:<epoch>`), enforced by a partial unique index on `(user_id, raw_text)`.
 
 ### Budgets (`/api/budgets`)
-Per-category limits for the current week or month; `spent_amount` is computed live from transactions on read.
+Per-category limits for the current week or month. `spent_amount` is a
+materialized column: it's re-derived from the user's transactions (debits in
+that category, within the budget window, converted to INR) and written back
+whenever those transactions change — on transaction create / edit / delete
+and after a Gmail or SMS sync — and re-checked on every `GET /api/budgets`,
+so the stored row always equals what the app shows.
 
 | Method | Path        | Description |
 |--------|-------------|--------------|
-| POST   | `/`         | `{ category, limit_amount, period: weekly\|monthly }`. 409 if a budget already covers that category this period. |
-| GET    | `/`         | Budgets active in the current period, with live spend. |
+| POST   | `/`         | `{ category, limit_amount, period: weekly\|monthly }`. Seeds `spent_amount` from spend already in the period. 409 if a same-category, same-period budget is already active. |
+| GET    | `/`         | Budgets active right now (`start_date <= now <= end_date`), each with current spend. |
 | PATCH  | `/{id}`     | Change `limit_amount`. |
 | DELETE | `/{id}`     | Delete a budget. |
 

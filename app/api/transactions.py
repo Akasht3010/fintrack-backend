@@ -13,6 +13,7 @@ from app.schemas.transaction import TransactionCreate, TransactionUpdate, Transa
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.services.account_service import AccountService
+from app.services.budget_service import BudgetService
 from app.services.category_service import CategoryService
 from app.utils.auth import get_current_user
 from app.utils.timezone import now_ist, to_ist_naive
@@ -135,6 +136,7 @@ async def create_transaction(
             detail="A transaction with this raw_text already exists for this account"
         )
     db.refresh(db_transaction)
+    BudgetService.sync_for_categories(db, current_user.id, db_transaction.category)
     return db_transaction
 
 @router.get("", response_model=TransactionList)
@@ -256,11 +258,17 @@ async def update_transaction(
         effective_currency = updates.get("currency", transaction.currency)
         _ensure_account_owned(db, current_user.id, effective_account_id, effective_currency)
 
+    # Editing amount/currency/type/date/category can all move the budgeted
+    # total — and a category change affects both the old and new category's
+    # budgets — so capture the pre-edit category before overwriting it.
+    previous_category = transaction.category
+
     for field, value in updates.items():
         setattr(transaction, field, value)
 
     db.commit()
     db.refresh(transaction)
+    BudgetService.sync_for_categories(db, current_user.id, {previous_category, transaction.category})
     return transaction
 
 @router.delete("/{transaction_id}")
@@ -279,6 +287,8 @@ async def delete_transaction(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Transaction not found"
         )
+    removed_category = transaction.category
     db.delete(transaction)
     db.commit()
+    BudgetService.sync_for_categories(db, current_user.id, removed_category)
     return {"message": "Transaction deleted"}

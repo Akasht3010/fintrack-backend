@@ -10,6 +10,7 @@ from app.services.gmail_service import GmailService
 from app.services.user_service import UserService
 from app.services.email_parser import parse_bank_email
 from app.services.categorizer import categorize_merchant
+from app.services.budget_service import BudgetService
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.utils.auth import get_current_user, verify_token
@@ -117,6 +118,7 @@ async def sync_gmail_emails(
     skipped_duplicate = 0
     skipped_unparsed = 0
     seen_this_sync = set()
+    affected_categories = set()
 
     for email in emails:
         marker = f"gmail:{email['id']}"
@@ -188,6 +190,7 @@ async def sync_gmail_emails(
         try:
             db.commit()
             imported += 1
+            affected_categories.add(transaction.category)
         except IntegrityError:
             # A concurrent sync (or retried request) inserted the same
             # (user_id, raw_text) marker first — the unique index catches
@@ -195,6 +198,8 @@ async def sync_gmail_emails(
             # not a failure.
             db.rollback()
             skipped_duplicate += 1
+
+    BudgetService.sync_for_categories(db, current_user.id, affected_categories)
 
     return {
         "imported": imported,

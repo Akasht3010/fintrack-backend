@@ -9,6 +9,7 @@ from app.models.transaction import Transaction
 from app.schemas.sms import SmsSyncRequest, SmsSyncResponse
 from app.services.email_parser import parse_bank_email
 from app.services.categorizer import categorize_merchant
+from app.services.budget_service import BudgetService
 from app.utils.auth import get_current_user
 from app.utils.timezone import IST
 
@@ -31,6 +32,7 @@ async def sync_sms_messages(
     skipped_duplicate = 0
     skipped_unparsed = 0
     seen_this_sync = set()
+    affected_categories = set()
 
     for message in payload.messages:
         body = message.body or ""
@@ -85,12 +87,15 @@ async def sync_sms_messages(
         try:
             db.commit()
             imported += 1
+            affected_categories.add(transaction.category)
         except IntegrityError:
             # Same race as Gmail sync: a concurrent/retried sync inserted
             # this (user_id, raw_text) marker first. The unique index
             # catches it — count as a duplicate rather than failing.
             db.rollback()
             skipped_duplicate += 1
+
+    BudgetService.sync_for_categories(db, current_user.id, affected_categories)
 
     return SmsSyncResponse(
         imported=imported,

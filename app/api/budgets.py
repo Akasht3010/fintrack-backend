@@ -28,7 +28,7 @@ async def create_budget(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A budget for '{budget.category}' already covers the current period"
         )
-    return BudgetService.to_response(db, created)
+    return BudgetService.to_response(created)
 
 @router.get("", response_model=list[BudgetResponse])
 async def list_budgets(
@@ -37,7 +37,7 @@ async def list_budgets(
 ):
     """List the authenticated user's budgets active in the current period, with live spend computed from transactions."""
     budgets = BudgetService.list_active_budgets(db, current_user.id)
-    return [BudgetService.to_response(db, b) for b in budgets]
+    return [BudgetService.to_response(b) for b in budgets]
 
 @router.patch("/{budget_id}", response_model=BudgetResponse)
 async def update_budget(
@@ -52,7 +52,7 @@ async def update_budget(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
 
     updated = BudgetService.update_limit(db, budget, update.limit_amount)
-    return BudgetService.to_response(db, updated)
+    return BudgetService.to_response(updated)
 
 @router.delete("/{budget_id}")
 async def delete_budget(

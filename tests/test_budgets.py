@@ -1,3 +1,22 @@
+from app.utils.timezone import now_ist
+
+
+def _in_period_date(hour: int = 12) -> str:
+    """A naive ISO timestamp guaranteed to fall inside the current weekly
+    and monthly budget window (the app treats offset-less strings as IST)."""
+    return now_ist().replace(hour=hour, minute=0, second=0, microsecond=0).isoformat()
+
+
+def _budget_row(user_id: int):
+    from app.config.database import SessionLocal
+    from app.models.budget import Budget
+    db = SessionLocal()
+    try:
+        return db.query(Budget).filter(Budget.user_id == user_id).all()
+    finally:
+        db.close()
+
+
 def test_create_budget(client, auth_headers):
     headers, _ = auth_headers
     res = client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers)
@@ -66,17 +85,17 @@ def test_budget_spend_reflects_matching_debit_transactions_only(client, auth_hea
     # Counts: a debit in the budgeted category
     client.post("/api/transactions", json={
         "amount": 300.0, "currency": "INR", "type": "debit", "category": "food",
-        "merchant": "Cafe", "description": "lunch", "date": "2026-08-01T12:00:00", "source": "manual"
+        "merchant": "Cafe", "description": "lunch", "date": _in_period_date(12), "source": "manual"
     }, headers=headers)
     # Doesn't count: a credit (refund) in the same category
     client.post("/api/transactions", json={
         "amount": 50.0, "currency": "INR", "type": "credit", "category": "food",
-        "merchant": "Cafe", "description": "refund", "date": "2026-08-01T13:00:00", "source": "manual"
+        "merchant": "Cafe", "description": "refund", "date": _in_period_date(13), "source": "manual"
     }, headers=headers)
     # Doesn't count: a debit in a different category
     client.post("/api/transactions", json={
         "amount": 400.0, "currency": "INR", "type": "debit", "category": "transport",
-        "merchant": "Cab", "description": "ride", "date": "2026-08-01T14:00:00", "source": "manual"
+        "merchant": "Cab", "description": "ride", "date": _in_period_date(14), "source": "manual"
     }, headers=headers)
 
     res = client.get("/api/budgets", headers=headers)
@@ -84,6 +103,45 @@ def test_budget_spend_reflects_matching_debit_transactions_only(client, auth_hea
     budgets = res.json()
     assert len(budgets) == 1
     assert budgets[0]["spent_amount"] == 300.0
+
+
+def test_spent_amount_is_materialized_onto_the_db_row(client, auth_headers):
+    headers, user = auth_headers
+    client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers)
+
+    # Adding a transaction should write through to budgets.spent_amount,
+    # not just change what the API computes on read.
+    client.post("/api/transactions", json={
+        "amount": 300.0, "currency": "INR", "type": "debit", "category": "food",
+        "merchant": "Cafe", "description": "lunch", "date": _in_period_date(), "source": "manual"
+    }, headers=headers)
+    assert [b.spent_amount for b in _budget_row(user["id"])] == [300.0]
+
+    # ...and editing it up
+    txns = client.get("/api/transactions", headers=headers).json()["transactions"]
+    client.patch(f"/api/transactions/{txns[0]['id']}", json={"amount": 500.0}, headers=headers)
+    assert [b.spent_amount for b in _budget_row(user["id"])] == [500.0]
+
+    # ...and deleting it back to zero
+    client.delete(f"/api/transactions/{txns[0]['id']}", headers=headers)
+    assert [b.spent_amount for b in _budget_row(user["id"])] == [0.0]
+
+
+def test_recategorizing_a_transaction_moves_spend_between_budgets(client, auth_headers):
+    headers, user = auth_headers
+    client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers)
+    client.post("/api/budgets", json={"category": "transport", "limit_amount": 2000, "period": "monthly"}, headers=headers)
+
+    client.post("/api/transactions", json={
+        "amount": 300.0, "currency": "INR", "type": "debit", "category": "food",
+        "merchant": "Cafe", "description": "lunch", "date": _in_period_date(), "source": "manual"
+    }, headers=headers)
+    txn_id = client.get("/api/transactions", headers=headers).json()["transactions"][0]["id"]
+
+    client.patch(f"/api/transactions/{txn_id}", json={"category": "transport"}, headers=headers)
+
+    spent = {b.category: b.spent_amount for b in _budget_row(user["id"])}
+    assert spent == {"food": 0.0, "transport": 300.0}
 
 
 def test_update_budget_limit(client, auth_headers):

@@ -42,7 +42,7 @@ def compute_spent(db: Session, user_id: int, category: str, start_date: datetime
         Transaction.date <= end_date
     ).group_by(Transaction.currency).all()
 
-    return sum(to_home_currency(float(total or 0.0), currency, start_date.date()) for currency, total in rows)
+    return round(sum(to_home_currency(float(total or 0.0), currency, start_date.date()) for currency, total in rows), 2)
 
 
 class BudgetService:
@@ -67,11 +67,14 @@ class BudgetService:
         if existing:
             raise DuplicateBudgetError()
 
+        # A budget created mid-period should already account for spend that
+        # happened earlier in the same window, so seed the stored figure
+        # instead of starting at 0.
         budget = Budget(
             user_id=user_id,
             category=category,
             limit_amount=limit_amount,
-            spent_amount=0,
+            spent_amount=compute_spent(db, user_id, category, start_date, end_date),
             period=period,
             start_date=start_date,
             end_date=end_date
@@ -82,13 +85,49 @@ class BudgetService:
         return budget
 
     @staticmethod
+    def refresh_spent(db: Session, budgets: list[Budget]) -> bool:
+        """Recompute each budget's stored spent_amount from its transactions.
+        Commits only if something actually changed. Returns whether it did."""
+        changed = False
+        for budget in budgets:
+            fresh = compute_spent(db, budget.user_id, budget.category, budget.start_date, budget.end_date)
+            if fresh != budget.spent_amount:
+                budget.spent_amount = fresh
+                changed = True
+        if changed:
+            db.commit()
+        return changed
+
+    @staticmethod
+    def sync_for_categories(db: Session, user_id: int, categories) -> None:
+        """Re-materialize spent_amount for this user's budgets in the given
+        categories. Call after any change to that user's transactions so the
+        stored column stays equal to what the API/UI shows. A `str` or any
+        iterable of category names is accepted; falsy entries are ignored."""
+        if isinstance(categories, str):
+            categories = [categories]
+        names = {c for c in categories if c}
+        if not names:
+            return
+        budgets = db.query(Budget).filter(
+            Budget.user_id == user_id,
+            Budget.category.in_(names)
+        ).all()
+        BudgetService.refresh_spent(db, budgets)
+
+    @staticmethod
     def list_active_budgets(db: Session, user_id: int) -> list[Budget]:
         now = now_ist()
-        return db.query(Budget).filter(
+        budgets = db.query(Budget).filter(
             Budget.user_id == user_id,
             Budget.start_date <= now,
             Budget.end_date >= now
         ).order_by(Budget.category).all()
+        # Safety net + one-time backfill for rows written before spent_amount
+        # was materialized: guarantee the stored column matches what this
+        # response reports. A no-op write-wise once everything's in sync.
+        BudgetService.refresh_spent(db, budgets)
+        return budgets
 
     @staticmethod
     def get_budget(db: Session, user_id: int, budget_id: int) -> Budget:
@@ -107,14 +146,13 @@ class BudgetService:
         db.commit()
 
     @staticmethod
-    def to_response(db: Session, budget: Budget) -> dict:
-        spent = compute_spent(db, budget.user_id, budget.category, budget.start_date, budget.end_date)
+    def to_response(budget: Budget) -> dict:
         return {
             "id": budget.id,
             "user_id": budget.user_id,
             "category": budget.category,
             "limit_amount": budget.limit_amount,
-            "spent_amount": spent,
+            "spent_amount": budget.spent_amount,
             "period": budget.period,
             "start_date": budget.start_date,
             "end_date": budget.end_date
