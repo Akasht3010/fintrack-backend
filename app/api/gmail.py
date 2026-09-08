@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 from app.config.database import get_db
@@ -117,8 +118,14 @@ async def sync_gmail_emails(
     imported = 0
     skipped_duplicate = 0
     skipped_unparsed = 0
-    seen_this_sync = set()
+    seen_this_sync: list[tuple[float, datetime]] = []
     affected_categories = set()
+
+    # One real purchase often generates several emails minutes apart — the
+    # bank alert, the card-network alert, the UPI-app receipt, the merchant
+    # receipt — each a distinct message. Collapse anything with the same
+    # amount within this window (regardless of source) to a single row.
+    DEDUP_WINDOW = timedelta(minutes=10)
 
     for email in emails:
         marker = f"gmail:{email['id']}"
@@ -152,26 +159,25 @@ async def sync_gmail_emails(
         except Exception:
             email_date = now_ist()
 
-        # Some banks send multiple emails for the same underlying transaction
-        # (e.g. a generic alert + a separate fee notice) with different
-        # message IDs but the same amount and timestamp — catch those too,
-        # both within this sync batch and against already-imported ones.
-        dedup_key = (parsed["amount"], email_date)
-        if dedup_key in seen_this_sync:
+        window_secs = DEDUP_WINDOW.total_seconds()
+        if any(
+            amt == parsed["amount"] and abs((seen - email_date).total_seconds()) <= window_secs
+            for amt, seen in seen_this_sync
+        ):
             skipped_duplicate += 1
             continue
 
-        duplicate_amount_date = db.query(Transaction).filter(
+        duplicate_nearby = db.query(Transaction).filter(
             Transaction.user_id == current_user.id,
-            Transaction.source == "gmail",
             Transaction.amount == parsed["amount"],
-            Transaction.date == email_date
+            Transaction.date >= email_date - DEDUP_WINDOW,
+            Transaction.date <= email_date + DEDUP_WINDOW,
         ).first()
-        if duplicate_amount_date:
+        if duplicate_nearby:
             skipped_duplicate += 1
             continue
 
-        seen_this_sync.add(dedup_key)
+        seen_this_sync.append((parsed["amount"], email_date))
 
         transaction = Transaction(
             user_id=current_user.id,

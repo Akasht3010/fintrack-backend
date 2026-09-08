@@ -130,12 +130,17 @@ class GmailService:
 
         # Keyword-based rather than guessing specific bank sender addresses —
         # far more likely to actually match real alert emails regardless of
-        # which bank sent them. False positives are filtered out downstream
-        # by the amount parser (an email with no parseable amount is skipped).
+        # which bank sent them. Deliberately excludes merchant / UPI-app
+        # receipt phrasings ("you paid", "payment successful", "money
+        # received") — those fire for the same purchase the bank already
+        # alerted on, so including them just multiplied every transaction.
+        # Remaining false positives are dropped downstream by the parser
+        # (no parseable amount / statement wording) and by the sync's
+        # same-amount-within-10-minutes dedup.
         keywords = (
-            'debited OR credited OR "transaction alert" OR "payment alert" '
-            'OR "account alert" OR "has been debited" OR "has been credited" '
-            'OR "spent on your" OR "you paid" OR "money received"'
+            '"debited from" OR "credited to" OR "has been debited" '
+            'OR "has been credited" OR "transaction alert" OR "debit alert" '
+            'OR "credit alert" OR "account alert"'
         )
         query = f'after:{date_limit} ({keywords})'
 

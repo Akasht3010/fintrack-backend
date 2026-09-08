@@ -162,10 +162,12 @@ Bank-alert email import. Refresh tokens are stored Fernet-encrypted.
 | GET    | `/authorize`  | Starts Gmail's OAuth consent (readonly scope). Takes `?token=` (the user's access token) and `?app_redirect_uri=`, both bound to a server-side nonce. |
 | GET    | `/callback`   | Google redirects here; exchanges the code, stores the refresh token, bounces back to the app with `?gmail_connected=true`. |
 | POST   | `/disconnect` | Best-effort revoke with Google, then clear the stored token. |
-| POST   | `/sync`       | Fetch bank-alert emails, parse what it can (`email_parser`), auto-categorize (`categorizer`), and insert transactions. Skips already-imported and same-amount/same-time duplicates. A stale (`invalid_grant`) token clears the connection and 401s. |
+| POST   | `/sync`       | Fetch bank-alert emails, parse what it can (`email_parser`), auto-categorize (`categorizer`), and insert transactions. A stale (`invalid_grant`) token clears the connection and 401s. |
+
+The search is restricted to bank-alert phrasing (`"debited from"`, `"credited to"`, `"transaction alert"`, …) — not merchant / UPI-app receipts, which describe the same purchase the bank already alerted on. `email_parser` additionally drops failed-payment notices and statement / credit-card-bill emails (an "amount due" isn't a transaction). Finally, the sync collapses anything with the **same amount within a 10-minute window** (any source) to one row, so the handful of emails one purchase generates don't each become a transaction.
 
 ### SMS (`/api/sms`)
-`POST /sync` — the Android app reads bank-alert SMS from the device inbox and posts them here as `{ messages: [{ address, body, date }] }`; the backend has no SMS access of its own. Parsed with the same `email_parser` (Indian bank SMS and email alerts phrase things near-identically). Returns `{ imported, skipped_duplicate, skipped_unparsed }`.
+`POST /sync` — the Android app reads bank-alert SMS from the device inbox and posts them here as `{ messages: [{ address, body, date }] }`; the backend has no SMS access of its own. Parsed with the same `email_parser` (Indian bank SMS and email alerts phrase things near-identically) and the same 10-minute same-amount dedup as the Gmail sync — so an SMS and its matching email collapse to one row. Returns `{ imported, skipped_duplicate, skipped_unparsed }`.
 
 ### Admin (`/api/admin`) — for [fintrack-monitor](../fintrack-monitor)
 Every route requires an `X-Admin-Key` header matching `ADMIN_API_KEY` (routes disabled if that env var is unset). Aggregate figures only — never per-user detail.

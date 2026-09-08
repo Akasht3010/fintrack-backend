@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -31,8 +31,12 @@ async def sync_sms_messages(
     imported = 0
     skipped_duplicate = 0
     skipped_unparsed = 0
-    seen_this_sync = set()
+    seen_this_sync: list[tuple[float, datetime]] = []
     affected_categories = set()
+
+    # One purchase can produce an SMS and one or more emails minutes apart —
+    # collapse same-amount hits within this window (any source) to one row.
+    DEDUP_WINDOW = timedelta(minutes=10)
 
     for message in payload.messages:
         body = message.body or ""
@@ -52,23 +56,25 @@ async def sync_sms_messages(
             skipped_unparsed += 1
             continue
 
-        # Same cross-source dedup as Gmail: a couple of banks send both an SMS
-        # and an email for the same transaction — don't double-import it.
-        dedup_key = (parsed["amount"], sms_date)
-        if dedup_key in seen_this_sync:
+        window_secs = DEDUP_WINDOW.total_seconds()
+        if any(
+            amt == parsed["amount"] and abs((seen - sms_date).total_seconds()) <= window_secs
+            for amt, seen in seen_this_sync
+        ):
             skipped_duplicate += 1
             continue
 
-        duplicate_amount_date = db.query(Transaction).filter(
+        duplicate_nearby = db.query(Transaction).filter(
             Transaction.user_id == current_user.id,
             Transaction.amount == parsed["amount"],
-            Transaction.date == sms_date
+            Transaction.date >= sms_date - DEDUP_WINDOW,
+            Transaction.date <= sms_date + DEDUP_WINDOW,
         ).first()
-        if duplicate_amount_date:
+        if duplicate_nearby:
             skipped_duplicate += 1
             continue
 
-        seen_this_sync.add(dedup_key)
+        seen_this_sync.append((parsed["amount"], sms_date))
 
         transaction = Transaction(
             user_id=current_user.id,

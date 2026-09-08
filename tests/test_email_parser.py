@@ -157,3 +157,27 @@ def test_email_with_no_amount_is_not_recorded():
         sender="HDFC Bank <alerts@hdfcbank.bank.in>",
     )
     assert result is None
+
+
+def test_credit_card_bill_is_not_recorded_as_a_transaction():
+    result = parse_bank_email(
+        subject="Your HDFC Bank Credit Card Statement",
+        body=(
+            "Dear Customer, your statement for card ending 4321 is generated.\n"
+            "Total Amount Due: Rs. 42,500.00\nMinimum Amount Due: Rs. 2,125.00\n"
+            "Payment Due Date: 20-Sep-2026"
+        ),
+        snippet="",
+        sender="HDFC Bank <cardstatements@hdfcbank.net>",
+    )
+    assert result is None
+
+
+def test_estatement_email_with_a_balance_figure_is_not_recorded():
+    result = parse_bank_email(
+        subject="Your e-Statement is ready",
+        body="Your account e-statement is attached. Closing balance Rs. 15,230.00.",
+        snippet="",
+        sender="ICICI Bank <estatement@icicibank.com>",
+    )
+    assert result is None

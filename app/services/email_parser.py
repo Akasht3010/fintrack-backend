@@ -26,6 +26,20 @@ FAILURE_WORDS = re.compile(
     re.IGNORECASE
 )
 
+# Statements and credit-card bills quote an amount (running balance, total
+# due, minimum due) but no money moved on receipt of the email — recording
+# them creates a phantom transaction, often for a large amount.
+STATEMENT_BILL_WORDS = re.compile(
+    r"\b("
+    r"e-?statement|mini\s*statement|monthly\s+statement|account\s+statement|"
+    r"statement\s+(?:is\s+)?(?:ready|generated|available|attached)|"
+    r"total\s+amount\s+due|minimum\s+amount\s+due|min(?:imum)?\s+amt\s+due|"
+    r"amount\s+due|bill\s+(?:generated|amount|date)|payment\s+due|due\s+date|"
+    r"outstanding\s+(?:amount|balance)"
+    r")\b",
+    re.IGNORECASE
+)
+
 # UPI debit alerts name the payee twice: an opaque VPA handle, and (almost
 # always) the registered name behind it in parentheses right after — that
 # name is the actual "where did this money go"; the VPA alone is not
@@ -129,6 +143,9 @@ def parse_bank_email(subject: str, body: str, snippet: str, sender: str) -> Opti
     text = f"{subject}\n{body}\n{snippet}"
 
     if FAILURE_WORDS.search(text):
+        return None
+
+    if STATEMENT_BILL_WORDS.search(text):
         return None
 
     amount_match = None
