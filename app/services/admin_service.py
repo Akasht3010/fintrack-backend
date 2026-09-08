@@ -12,7 +12,6 @@ from app.models.otp_code import OtpCode
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.services.email_service import get_smtp_status
-from app.services.exchange_rate_service import to_home_currency, get_fx_status
 from app.utils.timezone import now_ist
 
 # Set once at import time (main.py imports the admin router at startup),
@@ -58,7 +57,9 @@ def get_health(db: Session) -> dict:
         "db_size_bytes": _db_size_bytes(db),
         "dependencies": {
             "smtp": get_smtp_status(),
-            "fx_rate_api": get_fx_status(),
+            # FX support was removed (INR-only) — kept in the payload as an
+            # inert entry so fintrack-monitor's schema doesn't break.
+            "fx_rate_api": {"ok": None, "checked_at": None, "error": None},
         },
     }
 
@@ -188,27 +189,19 @@ def get_stats(db: Session) -> dict:
 
 
 def _top_categories(db: Session, limit: int = 5) -> list[dict]:
-    """Top categories by transaction count, with amounts converted to the
-    home currency (see exchange_rate_service) since transactions can be
-    logged in whatever currency they actually happened in — summing raw
-    amounts across currencies would be meaningless."""
-    counts = (
-        db.query(Transaction.category, func.count(Transaction.id))
+    """Top categories by transaction count, with their total amount (INR)."""
+    rows = (
+        db.query(
+            Transaction.category,
+            func.count(Transaction.id).label("count"),
+            func.coalesce(func.sum(Transaction.amount), 0.0).label("total"),
+        )
         .group_by(Transaction.category)
         .order_by(func.count(Transaction.id).desc())
         .limit(limit)
         .all()
     )
-
-    result = []
-    for category, count in counts:
-        rows = (
-            db.query(Transaction.amount, Transaction.currency, Transaction.date)
-            .filter(Transaction.category == category)
-            .all()
-        )
-        total = sum(
-            to_home_currency(amount, currency, on_date=d.date() if d else None) for amount, currency, d in rows
-        )
-        result.append({"category": category, "count": count, "total_amount": round(total, 2)})
-    return result
+    return [
+        {"category": r.category, "count": r.count, "total_amount": round(float(r.total or 0.0), 2)}
+        for r in rows
+    ]

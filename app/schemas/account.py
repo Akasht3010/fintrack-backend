@@ -3,10 +3,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.services.exchange_rate_service import SUPPORTED_CURRENCIES
-
 AccountType = Literal["bank", "cash", "credit_card", "wallet", "investment"]
-SupportedCurrency = Literal[SUPPORTED_CURRENCIES]
 
 # A ceiling, not a positivity constraint — a credit card can legitimately
 # start with a negative opening_balance (an overpayment/credit), unlike a
@@ -16,9 +13,8 @@ MAX_OPENING_BALANCE = 100_000_000
 class AccountCreate(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     type: AccountType
-    # Unconstrained on AccountResponse (below) so reading back a pre-existing
-    # account with an unlisted currency never breaks — only creation is gated.
-    currency: SupportedCurrency = "INR"
+    # The app is INR-only; kept as a field so the row/response shape doesn't change.
+    currency: str = "INR"
     opening_balance: float = Field(default=0, ge=-MAX_OPENING_BALANCE, le=MAX_OPENING_BALANCE)
 
 class AccountUpdate(BaseModel):

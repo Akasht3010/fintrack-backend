@@ -59,7 +59,7 @@ app/
   schemas/        # Pydantic request/response schemas
   services/       # business logic — user, budget, account, category, otp,
                   #   recurring detection, categorizer, email_parser,
-                  #   email_service (SMTP), gmail_service, exchange_rate, admin
+                  #   email_service (SMTP), gmail_service, admin
   utils/          # JWT + OTP token helpers, Fernet crypto, OAuth-state nonces,
                   #   admin-key guard, IST timezone helpers
   config/         # DB session, app config, startup migrate/seed
@@ -101,11 +101,11 @@ See **Google OAuth setup** below — this needs real credentials and, for local 
 
 | Method | Path         | Description |
 |--------|--------------|--------------|
-| POST   | `/`          | Create a transaction. `source` is forced to `manual` server-side (the gmail/sms paths build rows directly). `category` must exist; `account_id`, if given, must be owned and its currency must match. 409 on a duplicate `raw_text`. |
+| POST   | `/`          | Create a transaction (amounts are INR). `source` is forced to `manual` server-side (the gmail/sms paths build rows directly). `category` must exist; `account_id`, if given, must be owned. 409 on a duplicate `raw_text`. |
 | GET    | `/`          | Paginated list (`page`, `limit≤100`), newest first. Filters: `category`, `q` (merchant/description search), `date_from`, `date_to`, `min_amount`, `max_amount`. |
 | GET    | `/export`    | Same filters (plus `source`, `type`) → streamed CSV download. String cells are guarded against spreadsheet formula injection. |
 | GET    | `/{id}`      | Get a transaction — 404 if not the caller's. |
-| PATCH  | `/{id}`      | Update `amount` / `currency` / `type` / `category` / `merchant` / `description` / `account_id`. |
+| PATCH  | `/{id}`      | Update `amount` / `type` / `category` / `merchant` / `description` / `account_id`. |
 | DELETE | `/{id}`      | Delete a transaction — 404 if not the caller's. |
 
 `source` is one of `manual`, `gmail`, `sms`, `aa` (account aggregator). Imported rows carry a per-source dedup marker in `raw_text` (`gmail:<id>`, `sms:<address>:<epoch>`), enforced by a partial unique index on `(user_id, raw_text)`.
@@ -113,7 +113,7 @@ See **Google OAuth setup** below — this needs real credentials and, for local 
 ### Budgets (`/api/budgets`)
 Per-category limits for the current week or month. `spent_amount` is a
 materialized column: it's re-derived from the user's transactions (debits in
-that category, within the budget window, converted to INR) and written back
+that category, within the budget window) and written back
 whenever those transactions change — on transaction create / edit / delete
 and after a Gmail or SMS sync — and re-checked on every `GET /api/budgets`,
 so the stored row always equals what the app shows. `remaining_amount`
@@ -144,15 +144,15 @@ Bank / cash / credit-card / wallet / investment accounts. `balance` is `opening_
 |--------|---------------|--------------|
 | GET    | `/`           | The caller's accounts (active only unless `?include_archived=true`), with live balances. |
 | GET    | `/net-worth`  | Assets minus credit-card balances owed, plus a per-account breakdown. |
-| POST   | `/`           | Create an account (`name`, `type`, `currency`, `opening_balance`). |
+| POST   | `/`           | Create an account (`name`, `type`, `opening_balance`). |
 | PATCH  | `/{id}`       | Rename, correct the opening balance, or archive/unarchive. |
 | DELETE | `/{id}`       | Delete — 409 if transactions still reference it (archive instead). |
 
 ### Insights (`/api/insights`)
-`GET /` → monthly debit and credit totals over the last `months` (1–12, default 6), this month's category breakdown, and top merchants. Multi-currency rows are converted to INR (`exchange_rate_service`) before summing.
+`GET /` → monthly debit and credit totals over the last `months` (1–12, default 6), this month's category breakdown, and top merchants. All amounts are INR.
 
 ### Recurring (`/api/recurring`)
-`GET /` → subscriptions/bills inferred from spacing and amount consistency across past transactions, each with a cadence, average amount, and next-due date, plus a combined INR monthly-equivalent total.
+`GET /` → subscriptions/bills inferred from spacing and amount consistency across past transactions, each with a cadence, average amount, and next-due date, plus a combined monthly-equivalent total.
 
 ### Gmail (`/api/gmail`)
 Bank-alert email import. Refresh tokens are stored Fernet-encrypted.
@@ -172,7 +172,7 @@ Every route requires an `X-Admin-Key` header matching `ADMIN_API_KEY` (routes di
 
 | Method | Path       | Description |
 |--------|------------|--------------|
-| GET    | `/health`  | Process uptime, a live DB ping + latency, DB size, and SMTP / FX-API dependency checks. |
+| GET    | `/health`  | Process uptime, a live DB ping + latency, DB size, and an SMTP dependency check. |
 | GET    | `/stats`   | User / transaction / account / budget counts, source breakdown, OTP funnel, stale-Gmail count, top categories, and 14-day signup & transaction series. |
 
 ## Auth model
@@ -244,5 +244,5 @@ app's `useGoogleAuth` / `useGmailConnect` hooks.
 - Postgres data lives in a named Docker volume (`fintrack_pgdata`), not in the repo — each environment gets its own local database.
 - `google-auth` (already a transitive dependency of `google-auth-oauthlib`) verifies Google's ID tokens; `google-auth-oauthlib`'s `Flow` handles the code exchange.
 - Business timestamps (`Transaction.date`, `created_at`, …) are stored as **naive IST**, truncated to whole seconds, regardless of source. `requirements.txt` bundles `tzdata` so `zoneinfo` resolves `Asia/Kolkata` on any host.
-- Amounts are stored in their original currency; anything that sums across currencies (insights, recurring, net worth) converts to INR first via `exchange_rate_service` (`SUPPORTED_CURRENCIES`: INR, USD, EUR, GBP, AED, SGD, AUD, CAD, JPY).
+- The app is INR-only. `Transaction.currency` / `Account.currency` still exist on the rows (always `"INR"`) so historical data stays valid, but there's no FX conversion anywhere — every total is a plain sum.
 - Deployed on Railway — `railway.json` sets the start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT` and restarts on failure.

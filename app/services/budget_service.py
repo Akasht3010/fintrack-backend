@@ -5,7 +5,6 @@ import calendar
 
 from app.models.budget import Budget
 from app.models.transaction import Transaction
-from app.services.exchange_rate_service import to_home_currency
 from app.utils.timezone import now_ist
 
 
@@ -29,20 +28,16 @@ def current_period_dates(period: str, now: datetime) -> tuple[datetime, datetime
 
 
 def compute_spent(db: Session, user_id: int, category: str, start_date: datetime, end_date: datetime) -> float:
-    """
-    Budgets (limit_amount) are always in the home currency, so spend per
-    currency is converted before combining — a plain SUM would otherwise
-    add raw INR and USD amounts together.
-    """
-    rows = db.query(Transaction.currency, func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
+    """Total debit spend in this category within the budget window (all INR)."""
+    total = db.query(func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
         Transaction.user_id == user_id,
         Transaction.category == category,
         Transaction.type == "debit",
         Transaction.date >= start_date,
         Transaction.date <= end_date
-    ).group_by(Transaction.currency).all()
+    ).scalar()
 
-    return round(sum(to_home_currency(float(total or 0.0), currency, start_date.date()) for currency, total in rows), 2)
+    return round(float(total or 0.0), 2)
 
 
 class BudgetService:

@@ -40,14 +40,9 @@ def detect_recurring(db: Session, user_id: int) -> List[dict]:
         .all()
     )
 
-    # Grouped by (merchant, currency) rather than merchant alone — averaging
-    # amounts across currencies for the same merchant name would produce a
-    # meaningless figure (a subscription's billing currency doesn't change
-    # from one charge to the next in practice, but the data shouldn't
-    # silently assume that).
-    groups: dict[tuple[str, str], list[Transaction]] = defaultdict(list)
+    groups: dict[str, list[Transaction]] = defaultdict(list)
     for t in transactions:
-        groups[(t.merchant.strip().lower(), t.currency)].append(t)
+        groups[t.merchant.strip().lower()].append(t)
 
     results = []
     for txns in groups.values():
@@ -81,7 +76,7 @@ def detect_recurring(db: Session, user_id: int) -> List[dict]:
             "merchant": last.merchant,
             "category": last.category,
             "average_amount": round(avg_amount, 2),
-            "currency": last.currency,
+            "currency": "INR",
             "cadence": cadence,
             "occurrences": len(txns),
             "last_date": last.date,
