@@ -44,6 +44,8 @@ def test_upi_debit_without_payee_name_falls_back_to_vpa_handle():
     )
     assert result["merchant"] == "Merchant Store"
     assert result["type"] == "debit"
+    # UPI to a handle could be a real purchase — not auto-tagged as a transfer.
+    assert result["category"] is None
 
 
 def test_neft_extracts_beneficiary_name_field():
@@ -64,6 +66,7 @@ def test_neft_extracts_beneficiary_name_field():
     assert result["type"] == "debit"
     assert result["merchant"] == "AKASH KOTAK BANK"
     assert result["description"] == "Paid to AKASH KOTAK BANK via NEFT"
+    assert result["category"] == "transfer"
 
 
 def test_neft_beneficiary_name_flattened_onto_one_line_with_single_spaces():
@@ -101,6 +104,7 @@ def test_fund_transfer_extracts_beneficiary_and_tags_mode():
     )
     assert result["merchant"] == "AKASH THAKKAR"
     assert result["description"] == "Paid to AKASH THAKKAR via Fund Transfer"
+    assert result["category"] == "transfer"
 
 
 def test_card_purchase_still_matched_by_at_pattern():
@@ -112,6 +116,7 @@ def test_card_purchase_still_matched_by_at_pattern():
     )
     assert result["merchant"] == "AMAZON.IN"
     assert result["description"] == "Paid to AMAZON.IN"
+    assert result["category"] is None
 
 
 def test_credit_email_uses_received_verb():

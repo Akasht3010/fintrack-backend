@@ -85,6 +85,7 @@ class ParsedEmailTransaction(TypedDict):
     type: str  # "debit" | "credit"
     merchant: str
     description: str
+    category: Optional[str]  # set to "transfer" for bank-to-bank transfers; else None
 
 
 def _extract_merchant(text: str) -> tuple[Optional[str], bool]:
@@ -173,12 +174,20 @@ def parse_bank_email(subject: str, body: str, snippet: str, sender: str) -> Opti
         # actively misleading ("spent at HDFC Bank InstaAlerts").
         merchant = "Bank transaction"
 
+    category = None
     if confident:
         mode = _transfer_mode(text)
         verb = "Received from" if is_credit else "Paid to"
         description = f"{verb} {merchant}"
         if mode:
             description += f" via {mode}"
+        # NEFT / IMPS / RTGS / "fund transfer" are account-to-account money
+        # movement, not spend or income — most often between the user's own
+        # accounts. Tag them so aggregations can leave them out (a transfer
+        # nets to zero across the two accounts). UPI is left uncategorized:
+        # a UPI payment to a person is just as likely a real expense.
+        if mode in ("NEFT", "IMPS", "RTGS", "Fund Transfer"):
+            category = "transfer"
     else:
         description = subject.strip() or merchant
 
@@ -186,5 +195,6 @@ def parse_bank_email(subject: str, body: str, snippet: str, sender: str) -> Opti
         "amount": amount,
         "type": txn_type,
         "merchant": merchant[:100],
-        "description": description[:200]
+        "description": description[:200],
+        "category": category,
     }

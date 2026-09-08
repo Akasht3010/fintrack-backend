@@ -35,6 +35,10 @@ async def get_insights(
     month_expr = extract("month", Transaction.date)
 
     # All amounts are INR, so every total below is a plain SQL SUM.
+    # `transfer` rows are money moved between the user's own accounts — they
+    # show up as a debit on one side and a credit on the other, netting to
+    # zero, so they're left out of every spend/income figure here.
+    not_a_transfer = Transaction.category != "transfer"
 
     def monthly_series(transaction_type: str) -> list[MonthlyTotal]:
         rows = (
@@ -46,7 +50,8 @@ async def get_insights(
             .filter(
                 Transaction.user_id == current_user.id,
                 Transaction.type == transaction_type,
-                Transaction.date >= range_start
+                Transaction.date >= range_start,
+                not_a_transfer,
             )
             .group_by(year_expr, month_expr)
             .all()
@@ -72,7 +77,8 @@ async def get_insights(
         .filter(
             Transaction.user_id == current_user.id,
             Transaction.type == "debit",
-            Transaction.date >= current_month_start
+            Transaction.date >= current_month_start,
+            not_a_transfer,
         )
         .group_by(Transaction.category)
         .all()
@@ -91,7 +97,8 @@ async def get_insights(
         .filter(
             Transaction.user_id == current_user.id,
             Transaction.type == "debit",
-            Transaction.date >= range_start
+            Transaction.date >= range_start,
+            not_a_transfer,
         )
         .group_by(Transaction.merchant)
         .order_by(func.sum(Transaction.amount).desc())

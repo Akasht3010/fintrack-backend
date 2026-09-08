@@ -35,7 +35,11 @@ def detect_recurring(db: Session, user_id: int) -> List[dict]:
     spacing and amount are consistent enough to be a recurring bill."""
     transactions = (
         db.query(Transaction)
-        .filter(Transaction.user_id == user_id, Transaction.type == "debit")
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.type == "debit",
+            Transaction.category != "transfer",  # account-to-account moves aren't bills
+        )
         .order_by(Transaction.date)
         .all()
     )

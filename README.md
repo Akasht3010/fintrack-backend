@@ -149,7 +149,7 @@ Bank / cash / credit-card / wallet / investment accounts. `balance` is `opening_
 | DELETE | `/{id}`       | Delete — 409 if transactions still reference it (archive instead). |
 
 ### Insights (`/api/insights`)
-`GET /` → monthly debit and credit totals over the last `months` (1–12, default 6), this month's category breakdown, and top merchants. All amounts are INR.
+`GET /` → monthly debit and credit totals over the last `months` (1–12, default 6), this month's category breakdown, and top merchants. All amounts are INR. `category = 'transfer'` rows (NEFT/IMPS/RTGS/fund transfers — money moved between accounts, a debit on one side and a credit on the other) are excluded from every figure here; recurring-bill detection skips them too. The parser tags bank transfers automatically; UPI-to-a-person is left as a normal expense.
 
 ### Recurring (`/api/recurring`)
 `GET /` → subscriptions/bills inferred from spacing and amount consistency across past transactions, each with a cadence, average amount, and next-due date, plus a combined monthly-equivalent total.

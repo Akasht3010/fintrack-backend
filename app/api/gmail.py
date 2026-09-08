@@ -184,7 +184,7 @@ async def sync_gmail_emails(
             amount=parsed["amount"],
             currency="INR",
             type=parsed["type"],
-            category=categorize_merchant(parsed["merchant"], parsed["description"]),
+            category=parsed.get("category") or categorize_merchant(parsed["merchant"], parsed["description"]),
             merchant=parsed["merchant"],
             description=parsed["description"],
             date=email_date,
