@@ -24,6 +24,7 @@ def test_create_budget(client, auth_headers):
     body = res.json()
     assert body["limit_amount"] == 5000
     assert body["spent_amount"] == 0
+    assert body["remaining_amount"] == 5000
 
 
 def test_create_budget_rejects_unknown_category(client, auth_headers):
@@ -125,6 +126,27 @@ def test_spent_amount_is_materialized_onto_the_db_row(client, auth_headers):
     # ...and deleting it back to zero
     client.delete(f"/api/transactions/{txns[0]['id']}", headers=headers)
     assert [b.spent_amount for b in _budget_row(user["id"])] == [0.0]
+
+
+def test_remaining_amount_tracks_limit_minus_spent(client, auth_headers):
+    headers, user = auth_headers
+    created = client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers).json()
+    assert created["remaining_amount"] == 5000
+
+    client.post("/api/transactions", json={
+        "amount": 1200.0, "currency": "INR", "type": "debit", "category": "food",
+        "merchant": "Cafe", "description": "lunch", "date": _in_period_date(), "source": "manual"
+    }, headers=headers)
+
+    listed = client.get("/api/budgets", headers=headers).json()[0]
+    assert listed["spent_amount"] == 1200.0
+    assert listed["remaining_amount"] == 3800.0
+    # The DB row carries it too — it's a generated column, not app-computed.
+    assert [b.remaining_amount for b in _budget_row(user["id"])] == [3800.0]
+
+    # Raising the limit lifts remaining without any extra write path.
+    client.patch(f"/api/budgets/{listed['id']}", json={"limit_amount": 8000}, headers=headers)
+    assert client.get("/api/budgets", headers=headers).json()[0]["remaining_amount"] == 6800.0
 
 
 def test_recategorizing_a_transaction_moves_spend_between_budgets(client, auth_headers):

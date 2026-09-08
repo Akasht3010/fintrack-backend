@@ -116,7 +116,9 @@ materialized column: it's re-derived from the user's transactions (debits in
 that category, within the budget window, converted to INR) and written back
 whenever those transactions change — on transaction create / edit / delete
 and after a Gmail or SMS sync — and re-checked on every `GET /api/budgets`,
-so the stored row always equals what the app shows.
+so the stored row always equals what the app shows. `remaining_amount`
+(`limit_amount - spent_amount`) is a DB-generated column — Postgres keeps it
+in step with no app involvement.
 
 | Method | Path        | Description |
 |--------|-------------|--------------|

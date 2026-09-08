@@ -153,6 +153,7 @@ class BudgetService:
             "category": budget.category,
             "limit_amount": budget.limit_amount,
             "spent_amount": budget.spent_amount,
+            "remaining_amount": budget.remaining_amount,
             "period": budget.period,
             "start_date": budget.start_date,
             "end_date": budget.end_date

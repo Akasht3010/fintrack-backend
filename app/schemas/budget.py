@@ -17,6 +17,7 @@ class BudgetResponse(BudgetBase):
     id: int
     user_id: int
     spent_amount: float
+    remaining_amount: float
     start_date: datetime
     end_date: datetime
 

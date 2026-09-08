@@ -109,6 +109,24 @@ def migrate_schema():
                     "WHERE user_id IS NULL AND name IN ('transfer', 'other')"
                 ))
 
+    if "budgets" in inspector.get_table_names():
+        budget_columns = {col["name"] for col in inspector.get_columns("budgets")}
+        if "remaining_amount" not in budget_columns:
+            # DB-generated column (see app/models/budget.py). Only Postgres
+            # can ADD one via ALTER TABLE — SQLite rejects adding a STORED
+            # generated column after the fact, but SQLite here is only ever
+            # the test DB, which is built fresh by create_all and already
+            # has it. try/except so a surprise doesn't block startup.
+            if engine.dialect.name == "postgresql":
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(
+                            "ALTER TABLE budgets ADD COLUMN remaining_amount DOUBLE PRECISION "
+                            "GENERATED ALWAYS AS (limit_amount - spent_amount) STORED"
+                        ))
+                except Exception as e:
+                    print(f"⚠️  Could not add budgets.remaining_amount generated column: {e}")
+
     existing_index_names = {idx["name"] for idx in inspector.get_indexes("transactions")}
     if "uq_transactions_user_raw_text" not in existing_index_names:
         try:
