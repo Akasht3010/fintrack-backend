@@ -1,0 +1,2 @@
+# Placeholder so ./web exists for the Docker build.
+# The Expo web export is copied in here at build time; the API runs fine without it.

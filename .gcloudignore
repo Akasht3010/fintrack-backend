@@ -1,0 +1,24 @@
+# Uploaded to Cloud Build for `gcloud run deploy --source` / `gcloud builds submit`.
+# NOTE: this file replaces .gitignore for upload filtering — so web/ (gitignored)
+# IS uploaded, which is what we want (it holds the built web assets).
+.git/
+.gitignore
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+*.db
+*.db.bak-*
+*.sqlite3
+.DS_Store
+.vscode/
+.claude/
+tests/
+sql/
+docker-compose.yml
+railway.json
+DEPLOY_GCP.md

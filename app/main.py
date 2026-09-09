@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from app.config.database import Base, engine
 from app.config.init_db import migrate_schema, seed_default_categories, encrypt_plaintext_gmail_tokens
 from app.api import auth, transactions, budgets, google_auth, gmail, insights, recurring, categories, accounts, sms, admin
+from app.web import mount_web
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -58,6 +59,9 @@ async def health_check():
     # HEAD too: uptime monitors (UptimeRobot etc.) default to HEAD checks to
     # avoid pulling a response body just to confirm liveness.
     return {"status": "ok", "version": "1.0.0"}
+
+# Static web build last, so every /api route and /health/docs win the match.
+mount_web(app)
 
 if __name__ == "__main__":
     import uvicorn

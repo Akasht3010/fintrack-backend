@@ -207,33 +207,18 @@ Since free ngrok URLs change on every restart, you'll need to redo step 3 each t
 
 ### Production
 
-The mobile app never talks to the Railway origin directly — it goes through
-the Cloudflare Worker proxy (`fintrack-api-proxy`, in the `fintrack-proxy`
-repo), which forwards every path to Railway and passes OAuth 3xx redirects
-through untouched. That indirection exists because some mobile carriers
-(e.g. Jio) can't resolve `*.up.railway.app`; a browser redirect there fails
-with **"Safari can't open the page because the server can't be found."**
+In production `PUBLIC_BASE_URL` is the app's one public origin — the Cloud Run
+custom domain (`https://DOMAIN`). Google redirects the user's browser straight
+to it after consent, so it has to be a host that resolves on any network; a
+Cloud Run custom domain does (the old Railway `*.up.railway.app` didn't on some
+carriers, which is why a Cloudflare proxy used to sit in front — that's gone).
 
-So in production `PUBLIC_BASE_URL` must be the **proxy** URL, not the Railway
-URL — otherwise Google's post-consent redirect points the user's browser
-straight at a host it can't reach:
+On the Web OAuth client in Google Cloud Console:
 
-```
-PUBLIC_BASE_URL=https://fintrack-api-proxy.fintrack-proxy.workers.dev
-```
+- **Authorized redirect URIs** — `https://DOMAIN/api/auth/google/callback` and `https://DOMAIN/api/gmail/callback`
+- **Authorized domains** (consent screen) — `DOMAIN`
 
-Set this in the Railway service's environment variables (Railway redeploys
-on change). Then, on the same Web client in Google Cloud Console:
-
-- **Authorized redirect URIs** — add:
-  - `https://fintrack-api-proxy.fintrack-proxy.workers.dev/api/auth/google/callback`
-  - `https://fintrack-api-proxy.fintrack-proxy.workers.dev/api/gmail/callback`
-- **Authorized domains** (consent screen) — add `fintrack-proxy.workers.dev`
-
-Verify by opening
-`https://fintrack-api-proxy.fintrack-proxy.workers.dev/api/auth/google/authorize?app_redirect_uri=fintrack%3A%2F%2Fauth-callback`
-in a desktop browser and checking that the resulting `accounts.google.com`
-URL's `redirect_uri=` points at `workers.dev`, not `railway.app`.
+See **[DEPLOY_GCP.md](DEPLOY_GCP.md)** for the full deploy.
 
 The app side (`fintrack`) passes its own deep link as `app_redirect_uri`;
 that must be the registered custom scheme (`fintrack://auth-callback`), not
@@ -247,4 +232,4 @@ app's `useGoogleAuth` / `useGmailConnect` hooks.
 - `google-auth` (already a transitive dependency of `google-auth-oauthlib`) verifies Google's ID tokens; `google-auth-oauthlib`'s `Flow` handles the code exchange.
 - Business timestamps (`Transaction.date`, `created_at`, …) are stored as **naive IST**, truncated to whole seconds, regardless of source. `requirements.txt` bundles `tzdata` so `zoneinfo` resolves `Asia/Kolkata` on any host.
 - The app is INR-only. `Transaction.currency` / `Account.currency` still exist on the rows (always `"INR"`) so historical data stays valid, but there's no FX conversion anywhere — every total is a plain sum.
-- Deployed on Railway — `railway.json` sets the start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT` and restarts on failure.
+- **Deploy:** one **Cloud Run** service (`Dockerfile`) serves both the API and the Expo web export (`app/web.py` mounts `./web`, the build the deploy step drops in), backed by **Cloud SQL** Postgres, with config in **Secret Manager** and CI via `cloudbuild.yaml`. Full runbook in **[DEPLOY_GCP.md](DEPLOY_GCP.md)**.
