@@ -1,14 +1,16 @@
 # Cloud Build pipeline: build the Expo web export from the frontend repo,
 # bake it + the API into one image, deploy to Cloud Run.
 #
-# Wire this to a trigger on pushes to main. Set these substitution variables
-# on the trigger (see DEPLOY_GCP.md):
+# Wire this to a trigger per environment (see ENVIRONMENTS.md). Substitution
+# variables set on the trigger:
 #   _REGION         e.g. asia-south1
-#   _SERVICE        Cloud Run service name, e.g. fintrack
-#   _AR_REPO        Artifact Registry repo name, e.g. fintrack
-#   _SQL_INSTANCE   Cloud SQL connection name  PROJECT:REGION:INSTANCE
-#   _APP_URL        public https origin the app is served on, e.g. https://fintrack.example.com
+#   _SERVICE        Cloud Run service name        (fintrack / fintrack-uat)
+#   _AR_REPO        Artifact Registry repo name
+#   _SQL_INSTANCE   Cloud SQL connection name     PROJECT:REGION:INSTANCE
+#   _APP_URL        public https origin for this env
+#   _SECRET_PREFIX  Secret Manager name prefix    (fintrack / fintrack-uat)
 #   _FRONTEND_REPO  git URL of the Expo app repo
+#   _FRONTEND_REF   frontend branch/tag to build  (main / uat)
 
 substitutions:
   _REGION: asia-south1
@@ -16,7 +18,9 @@ substitutions:
   _AR_REPO: cloud-run-source-deploy   # the repo `gcloud run deploy --source` auto-creates
   _SQL_INSTANCE: ""
   _APP_URL: ""
+  _SECRET_PREFIX: fintrack
   _FRONTEND_REPO: "https://github.com/Akasht3010/fintrack.git"
+  _FRONTEND_REF: main
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -31,7 +35,7 @@ steps:
       - -c
       - |
         set -euo pipefail
-        git clone --depth 1 "${_FRONTEND_REPO}" /frontend
+        git clone --depth 1 --branch "${_FRONTEND_REF}" "${_FRONTEND_REPO}" /frontend
         cd /frontend
         npm ci
         node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('app.json'));j.expo.extra.apiUrl='${_APP_URL}';fs.writeFileSync('app.json',JSON.stringify(j,null,2))"
@@ -71,7 +75,7 @@ steps:
       - --min-instances=0
       - --max-instances=4
       - --set-env-vars=ENV=production,ACCESS_TOKEN_EXPIRE_MINUTES=30,OTP_EXPIRE_MINUTES=5,OTP_RESEND_COOLDOWN_SECONDS=30,PUBLIC_BASE_URL=${_APP_URL},CORS_ORIGINS=${_APP_URL},SMTP_HOST=smtp.gmail.com,SMTP_PORT=587
-      - --set-secrets=DATABASE_URL=fintrack-database-url:latest,SECRET_KEY=fintrack-secret-key:latest,ENCRYPTION_KEY=fintrack-encryption-key:latest,GOOGLE_CLIENT_ID=fintrack-google-client-id:latest,GOOGLE_CLIENT_SECRET=fintrack-google-client-secret:latest,SMTP_USER=fintrack-smtp-user:latest,SMTP_PASSWORD=fintrack-smtp-password:latest,SMTP_FROM=fintrack-smtp-from:latest,ADMIN_API_KEY=fintrack-admin-api-key:latest
+      - --set-secrets=DATABASE_URL=${_SECRET_PREFIX}-database-url:latest,SECRET_KEY=${_SECRET_PREFIX}-secret-key:latest,ENCRYPTION_KEY=${_SECRET_PREFIX}-encryption-key:latest,GOOGLE_CLIENT_ID=${_SECRET_PREFIX}-google-client-id:latest,GOOGLE_CLIENT_SECRET=${_SECRET_PREFIX}-google-client-secret:latest,SMTP_USER=${_SECRET_PREFIX}-smtp-user:latest,SMTP_PASSWORD=${_SECRET_PREFIX}-smtp-password:latest,SMTP_FROM=${_SECRET_PREFIX}-smtp-from:latest,ADMIN_API_KEY=${_SECRET_PREFIX}-admin-api-key:latest
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID
