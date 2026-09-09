@@ -11,7 +11,6 @@ FastAPI backend for [FinTrack](https://github.com/Akasht3010/fintrack) — a uni
 - **Emailed OTP** (SMTP) — second factor on login and password reset
 - **cryptography** (Fernet) — encrypts Gmail refresh tokens at rest
 - **google-auth-oauthlib** / **google-api-python-client** — Google sign-in + Gmail OAuth and inbox reads
-- **Celery** + **Redis** — background jobs (wired in, not yet used)
 
 ## Getting started
 
