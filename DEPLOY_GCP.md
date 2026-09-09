@@ -5,9 +5,23 @@ One **Cloud Run** service runs the whole app — FastAPI on `/api/*`, `/health`,
 for PostgreSQL, with secrets in **Secret Manager** and builds through
 **Cloud Build**.
 
-This replaces the old split (backend on Railway, web on a Cloudflare Worker,
+This replaced the old split (backend on Railway, web on a Cloudflare Worker,
 the `fintrack-api-proxy` Worker). The mobile app stays on **EAS** — GCP doesn't
 distribute mobile apps.
+
+## Live deployment
+
+| | value |
+|---|---|
+| Project | `fintrack-494214` |
+| Region | `asia-south1` |
+| Cloud Run service | `fintrack` → **https://fintrack-989422306373.asia-south1.run.app** |
+| Cloud SQL | `fintrack-494214:asia-south1:fintrack-db` (POSTGRES_18, `db-f1-micro`), db `fintrack`, user `fintrack` |
+| Artifact Registry | `asia-south1-docker.pkg.dev/fintrack-494214/cloud-run-source-deploy` |
+| Deploy | Cloud Build trigger `deploy-main` on `fintrack-backend` `main`. Frontend changes: `gcloud builds triggers run deploy-main --branch=main --region=asia-south1`. |
+| OAuth | Web client `989422306373-…`, redirect URIs at `…run.app/api/auth/google/callback` + `/api/gmail/callback` |
+
+The rest of this doc is the from-scratch runbook (placeholders below).
 
 Fill in these throughout:
 
