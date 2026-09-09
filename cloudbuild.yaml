@@ -13,7 +13,7 @@
 substitutions:
   _REGION: asia-south1
   _SERVICE: fintrack
-  _AR_REPO: fintrack
+  _AR_REPO: cloud-run-source-deploy   # the repo `gcloud run deploy --source` auto-creates
   _SQL_INSTANCE: ""
   _APP_URL: ""
   _FRONTEND_REPO: "https://github.com/Akasht3010/fintrack.git"
@@ -44,7 +44,7 @@ steps:
     args:
       - build
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest
       - .
@@ -60,7 +60,7 @@ steps:
       - run
       - deploy
       - ${_SERVICE}
-      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
@@ -74,4 +74,4 @@ steps:
       - --set-secrets=DATABASE_URL=fintrack-database-url:latest,SECRET_KEY=fintrack-secret-key:latest,ENCRYPTION_KEY=fintrack-encryption-key:latest,GOOGLE_CLIENT_ID=fintrack-google-client-id:latest,GOOGLE_CLIENT_SECRET=fintrack-google-client-secret:latest,SMTP_USER=fintrack-smtp-user:latest,SMTP_PASSWORD=fintrack-smtp-password:latest,SMTP_FROM=fintrack-smtp-from:latest,ADMIN_API_KEY=fintrack-admin-api-key:latest
 
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID
