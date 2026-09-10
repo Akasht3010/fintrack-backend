@@ -8,7 +8,7 @@ channels.
 | | production | UAT |
 |---|---|---|
 | Cloud Run service | `fintrack` | `fintrack-uat` |
-| URL | `https://fintrack-989422306373.asia-south1.run.app` | `https://fintrack-uat-989422306373.asia-south1.run.app` *(set after first deploy)* |
+| URL | `https://fintrack-989422306373.asia-south1.run.app` | `https://fintrack-uat-hl5vxmaebq-el.a.run.app` |
 | Database (on `fintrack-db`) | `fintrack` | `fintrack_uat` |
 | DB user | `fintrack` | `fintrack_uat` |
 | Secret Manager prefix | `fintrack-*` | `fintrack-uat-*` |
@@ -102,7 +102,7 @@ gcloud builds submit --config cloudbuild.yaml --region=asia-south1 \
   --substitutions=_REGION=asia-south1,_SERVICE=fintrack-uat,_AR_REPO=cloud-run-source-deploy,_SQL_INSTANCE=fintrack-494214:asia-south1:fintrack-db,_SECRET_PREFIX=fintrack-uat,_FRONTEND_REF=uat,_APP_URL=https://PLACEHOLDER
 ```
 
-It prints the service URL. Re-run once with the real `_APP_URL=https://fintrack-uat-989422306373.asia-south1.run.app` so `PUBLIC_BASE_URL` / `CORS_ORIGINS` and the baked-in web `apiUrl` are correct.
+The service gets a legacy-format URL like `https://fintrack-uat-hl5vxmaebq-el.a.run.app` (run `gcloud run services describe fintrack-uat --region=asia-south1 --format="value(status.url)"`). If `--allow-unauthenticated` did not stick, run `gcloud run services add-iam-policy-binding fintrack-uat --region=asia-south1 --member=allUsers --role=roles/run.invoker`. Re-run the deploy with the real `_APP_URL` so `PUBLIC_BASE_URL` / `CORS_ORIGINS` and the baked-in web `apiUrl` are correct.
 
 ### 4. UAT deploy trigger
 
@@ -118,7 +118,7 @@ Console → Cloud Build → Triggers → **Create trigger** (same as `deploy-pro
   | `_AR_REPO` | `cloud-run-source-deploy` |
   | `_SQL_INSTANCE` | `fintrack-494214:asia-south1:fintrack-db` |
   | `_SECRET_PREFIX` | `fintrack-uat` |
-  | `_APP_URL` | `https://fintrack-uat-989422306373.asia-south1.run.app` |
+  | `_APP_URL` | `https://fintrack-uat-hl5vxmaebq-el.a.run.app` |
   | `_FRONTEND_REF` | `uat` |
 
 The existing `deploy-prod` trigger just needs `_SECRET_PREFIX=fintrack` and
@@ -130,8 +130,8 @@ Google Cloud Console → Credentials → Web client `989422306373-…` → Autho
 redirect URIs, add:
 
 ```
-https://fintrack-uat-989422306373.asia-south1.run.app/api/auth/google/callback
-https://fintrack-uat-989422306373.asia-south1.run.app/api/gmail/callback
+https://fintrack-uat-hl5vxmaebq-el.a.run.app/api/auth/google/callback
+https://fintrack-uat-hl5vxmaebq-el.a.run.app/api/gmail/callback
 ```
 
 Each service's `PUBLIC_BASE_URL` differs, so each builds its own `redirect_uri`;
@@ -149,7 +149,7 @@ Set it per **EAS environment** once:
 ```bash
 cd fintrack
 eas env:create --environment production --name EXPO_PUBLIC_API_URL --value https://fintrack-989422306373.asia-south1.run.app --visibility plaintext
-eas env:create --environment preview    --name EXPO_PUBLIC_API_URL --value https://fintrack-uat-989422306373.asia-south1.run.app --visibility plaintext
+eas env:create --environment preview    --name EXPO_PUBLIC_API_URL --value https://fintrack-uat-hl5vxmaebq-el.a.run.app --visibility plaintext
 ```
 
 `eas.json` maps `build.production` → environment `production` and
