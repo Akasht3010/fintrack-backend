@@ -2,8 +2,12 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from app.config.database import Base, engine
 from app.config.init_db import migrate_schema, seed_default_categories, encrypt_plaintext_gmail_tokens
+from app.utils.rate_limit import limiter
 from app.api import auth, transactions, budgets, google_auth, gmail, insights, recurring, categories, accounts, sms, admin
 from app.web import mount_web
 
@@ -23,6 +27,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # The mobile app itself isn't subject to CORS (browsers enforce it, not RN's
 # networking layer) — this only matters for browser-based clients (Expo web,

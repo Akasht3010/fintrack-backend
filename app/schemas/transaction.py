@@ -2,6 +2,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 from typing import Optional, Literal
 
+from app.schemas.money import Money
+
 TransactionType = Literal["debit", "credit"]
 TransactionSource = Literal["gmail", "manual", "sms", "aa"]
 
@@ -14,7 +16,7 @@ MAX_TRANSACTION_AMOUNT = 100_000_000
 class TransactionBase(BaseModel):
     # The app is INR-only. `currency` is kept on the row (and echoed back
     # here) purely so existing data stays valid; it's always "INR".
-    amount: float = Field(gt=0, le=MAX_TRANSACTION_AMOUNT)
+    amount: Money = Field(gt=0, le=MAX_TRANSACTION_AMOUNT)
     currency: str = "INR"
     type: TransactionType
     category: str
@@ -27,9 +29,13 @@ class TransactionBase(BaseModel):
 
 class TransactionCreate(TransactionBase):
     raw_text: Optional[str] = None
+    # Optional client-generated dedup key so a retried create (e.g. a mobile
+    # client resending after a timeout) can't double-insert — enforced by a
+    # DB unique index the same way raw_text is for imported transactions.
+    idempotency_key: Optional[str] = Field(default=None, max_length=100)
 
 class TransactionUpdate(BaseModel):
-    amount: Optional[float] = Field(default=None, gt=0, le=MAX_TRANSACTION_AMOUNT)
+    amount: Optional[Money] = Field(default=None, gt=0, le=MAX_TRANSACTION_AMOUNT)
     type: Optional[TransactionType] = None
     category: Optional[str] = None
     merchant: Optional[str] = None

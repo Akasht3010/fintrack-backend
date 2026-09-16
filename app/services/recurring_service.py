@@ -71,7 +71,11 @@ def detect_recurring(db: Session, user_id: int) -> List[dict]:
         avg_amount = mean(amounts)
         if avg_amount <= 0:
             continue
-        amount_spread = (max(amounts) - min(amounts)) / avg_amount
+        # amounts are Decimal (exact NUMERIC(12,2) columns); the tolerance
+        # ratio below is just a heuristic threshold, not money, so it's fine
+        # to drop to float for this one comparison rather than make every
+        # caller of this module thread a Decimal tolerance constant through.
+        amount_spread = float((max(amounts) - min(amounts)) / avg_amount)
         if amount_spread > AMOUNT_SPREAD_TOLERANCE:
             continue
 
@@ -79,7 +83,9 @@ def detect_recurring(db: Session, user_id: int) -> List[dict]:
         results.append({
             "merchant": last.merchant,
             "category": last.category,
-            "average_amount": round(avg_amount, 2),
+            # A derived display statistic, not a stored money column — float
+            # is fine here (and needed: MONTHLY_EQUIVALENT below is float).
+            "average_amount": round(float(avg_amount), 2),
             "currency": "INR",
             "cadence": cadence,
             "occurrences": len(txns),

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -10,14 +12,14 @@ class AccountInUseError(Exception):
     pass
 
 
-def _sum_for_type(db: Session, account: Account, transaction_type: str) -> float:
-    total = db.query(func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
+def _sum_for_type(db: Session, account: Account, transaction_type: str) -> Decimal:
+    total = db.query(func.coalesce(func.sum(Transaction.amount), Decimal("0"))).filter(
         Transaction.account_id == account.id, Transaction.type == transaction_type
     ).scalar()
-    return float(total or 0.0)
+    return total or Decimal("0")
 
 
-def compute_balance(db: Session, account: Account) -> float:
+def compute_balance(db: Session, account: Account) -> Decimal:
     """
     For asset accounts, balance is money held: opening_balance + credits - debits.
     For credit_card accounts, balance is money owed, which moves the other way —
@@ -45,7 +47,7 @@ class AccountService:
         return db.query(Account).filter(Account.id == account_id, Account.user_id == user_id).first()
 
     @staticmethod
-    def create(db: Session, user_id: int, name: str, type: str, currency: str, opening_balance: float) -> Account:
+    def create(db: Session, user_id: int, name: str, type: str, currency: str, opening_balance: Decimal) -> Account:
         account = Account(
             user_id=user_id, name=name.strip(), type=type,
             currency="INR", opening_balance=opening_balance
@@ -58,7 +60,7 @@ class AccountService:
     @staticmethod
     def update(
         db: Session, account: Account,
-        name: str | None, opening_balance: float | None, is_archived: bool | None
+        name: str | None, opening_balance: Decimal | None, is_archived: bool | None
     ) -> Account:
         if name is not None:
             account.name = name.strip()
@@ -96,8 +98,8 @@ class AccountService:
         """Asset balances minus liability balances (all INR)."""
         accounts = AccountService.list_visible(db, user_id)
 
-        total_assets = 0.0
-        total_liabilities = 0.0
+        total_assets = Decimal("0")
+        total_liabilities = Decimal("0")
         items = []
         for account in accounts:
             balance = compute_balance(db, account)

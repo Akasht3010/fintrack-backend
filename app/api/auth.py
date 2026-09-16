@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.schemas.user import UserCreate, UserResponse
@@ -16,6 +16,7 @@ from app.utils.auth import (
     hash_password,
     get_current_user,
 )
+from app.utils.rate_limit import limiter
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.models.budget import Budget
@@ -30,6 +31,14 @@ gmail_service = GmailService()
 
 OTP_LOGIN_PURPOSE = "login"
 OTP_PASSWORD_RESET_PURPOSE = "password_reset"
+
+# No real user ever has this id — used to mint a pending_token for
+# forgot-password requests against an identifier that doesn't match any
+# account, so the response is indistinguishable from a real one. Every
+# downstream lookup of it just misses, same as an expired/garbage token.
+_NONEXISTENT_USER_SENTINEL = -1
+
+_SESSION_EXPIRED_MESSAGE = "Verification session expired. Please start over."
 
 
 def _validate_password_strength(value: str) -> str:
@@ -162,19 +171,27 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
     }
 
 @router.post("/login", response_model=LoginPendingResponse)
-async def login(request: LoginRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: Request, body: LoginRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Step 1 of login: verify the password, then email a one-time code. Doesn't
     issue an access token yet — that only happens after /verify-otp succeeds."""
-    identifier = request.identifier.strip()
+    identifier = body.identifier.strip()
     if not identifier:
         raise HTTPException(status_code=400, detail="Phone number or email is required")
 
     user = UserService.find_by_identifier(db, identifier)
+
+    # Same status/message whether the identifier is unknown or the password
+    # is wrong — a distinguishable response here would let an attacker (or a
+    # data broker) cheaply check which phone numbers/emails own a Fintrack
+    # account, which is itself a PII leak for a finance app.
+    invalid_credentials = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Incorrect phone/email or password"
+    )
+
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No account found for this phone number or email"
-        )
+        raise invalid_credentials
 
     if not user.password_hash:
         detail = (
@@ -184,8 +201,8 @@ async def login(request: LoginRequest, background_tasks: BackgroundTasks, db: Se
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
-    if not verify_password(request.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password")
+    if not verify_password(body.password, user.password_hash):
+        raise invalid_credentials
 
     try:
         issue_otp(db, user, purpose=OTP_LOGIN_PURPOSE, background_tasks=background_tasks)
@@ -230,11 +247,15 @@ async def resend_otp_endpoint(request: ResendOtpRequest, background_tasks: Backg
     whichever purpose the pending token was already scoped to."""
     payload = decode_pending_token(request.pending_token)
     if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Verification session expired. Please start over.")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_SESSION_EXPIRED_MESSAGE)
 
     user = UserService.get_user_by_id(db, payload["sub"])
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        # Same message as an expired/garbage token above — a pending_token
+        # for the sentinel id forgot-password mints when an identifier
+        # doesn't match an account lands here too, and must fail identically
+        # rather than leaking "no such account" via a distinct 404.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_SESSION_EXPIRED_MESSAGE)
 
     try:
         issue_otp(db, user, purpose=payload["purpose"], background_tasks=background_tasks)
@@ -245,31 +266,41 @@ async def resend_otp_endpoint(request: ResendOtpRequest, background_tasks: Backg
 
 
 @router.post("/forgot-password", response_model=LoginPendingResponse)
-async def forgot_password(request: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def forgot_password(request: Request, body: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Step 1 of password reset: email an OTP to the account's registered
     address. Deliberately doesn't require an existing password — this also
-    covers a Google-only account setting a password for the first time."""
-    identifier = request.identifier.strip()
+    covers a Google-only account setting a password for the first time.
+
+    Always returns the same 200 shape whether or not the identifier matches
+    an account — the OTP is only actually sent when it does — so this
+    endpoint can't be used to check which phone numbers/emails have a
+    Fintrack account."""
+    identifier = body.identifier.strip()
     if not identifier:
         raise HTTPException(status_code=400, detail="Phone number or email is required")
 
     user = UserService.find_by_identifier(db, identifier)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No account found for this phone number or email"
-        )
 
-    try:
-        issue_otp(db, user, purpose=OTP_PASSWORD_RESET_PURPOSE, background_tasks=background_tasks)
-    except OtpError as e:
-        raise HTTPException(status_code=e.status_code, detail=e.message)
-
-    pending_token = create_pending_token(user.id, purpose=OTP_PASSWORD_RESET_PURPOSE)
+    if user:
+        try:
+            issue_otp(db, user, purpose=OTP_PASSWORD_RESET_PURPOSE, background_tasks=background_tasks)
+        except OtpError:
+            # Swallowed rather than surfaced (e.g. the 429 resend-cooldown):
+            # a different status/response here for a real, recently-emailed
+            # account would leak the same "does this identifier exist"
+            # signal via a second request that this endpoint hides on the
+            # first. Any already-issued, still-valid code keeps working.
+            pass
+        pending_token = create_pending_token(user.id, purpose=OTP_PASSWORD_RESET_PURPOSE)
+        email_hint = _mask_email(user.email)
+    else:
+        pending_token = create_pending_token(_NONEXISTENT_USER_SENTINEL, purpose=OTP_PASSWORD_RESET_PURPOSE)
+        email_hint = _mask_email(identifier) if "@" in identifier else "your registered email"
 
     return {
         "pending_token": pending_token,
-        "email_hint": _mask_email(user.email)
+        "email_hint": email_hint
     }
 
 
@@ -279,16 +310,21 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
     and log the user straight in (the OTP already proved email ownership)."""
     user_id = verify_pending_token(request.pending_token, purpose=OTP_PASSWORD_RESET_PURPOSE)
     if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Verification session expired. Please start over.")
-
-    user = UserService.get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_SESSION_EXPIRED_MESSAGE)
 
     try:
+        # Checked before the user lookup below so the sentinel id
+        # forgot-password mints for a non-matching identifier (which never
+        # has an OTP row to match) fails here with the same "no pending
+        # code" error a real account gets for a missing/expired code —
+        # rather than a distinguishable "account not found" first.
         verify_otp_code(db, user_id, request.code, purpose=OTP_PASSWORD_RESET_PURPOSE)
     except OtpError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
+
+    user = UserService.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_SESSION_EXPIRED_MESSAGE)
 
     user.password_hash = hash_password(request.new_password)
     db.commit()
@@ -342,8 +378,12 @@ async def delete_current_user(
     if current_user.gmail_refresh_token:
         try:
             gmail_service.revoke_token(decrypt(current_user.gmail_refresh_token))
-        except Exception:
-            pass
+        except Exception as e:
+            # Best-effort: a failed revoke shouldn't block account deletion,
+            # but silently swallowing it means a systematically broken revoke
+            # path (wrong scopes, expired Google API access, blocked egress)
+            # would never surface anywhere — logged so it's at least visible.
+            print(f"⚠️  Gmail token revoke failed during account deletion for user {current_user.id}: {e}")
 
     # Every table with a hard FK to users.id has to be cleared first, or the
     # final delete hits an IntegrityError — Transaction before Account since

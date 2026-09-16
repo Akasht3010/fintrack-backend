@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Optional, TypedDict
 
 # Currency before amount ("INR 500", "INR: 500.00", "Rs.500", "₹500") is the
@@ -81,7 +82,7 @@ UPI_MODE_PATTERN = re.compile(r"\b(UPI|VPA)\b", re.IGNORECASE)
 
 
 class ParsedEmailTransaction(TypedDict):
-    amount: float
+    amount: Decimal
     type: str  # "debit" | "credit"
     merchant: str
     description: str
@@ -158,8 +159,11 @@ def parse_bank_email(subject: str, body: str, snippet: str, sender: str) -> Opti
         return None
 
     try:
-        amount = float(amount_match.group(1).replace(",", ""))
-    except ValueError:
+        # Decimal(str), not float(str) — a bank alert's amount must round-trip
+        # exactly into the same NUMERIC(12,2) a manual entry would produce,
+        # not the nearest binary float approximation.
+        amount = Decimal(amount_match.group(1).replace(",", ""))
+    except InvalidOperation:
         return None
 
     if amount <= 0:

@@ -8,6 +8,7 @@ os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token as google_id_token
@@ -105,5 +106,33 @@ async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
 
     access_token = create_access_token(data={"sub": user.id})
 
+    # The real JWT never goes in this redirect URL — a URL is exactly where
+    # a bearer token ends up in web server access logs, any reverse proxy in
+    # front of this service, and (on web) the browser's own history. Instead
+    # a short-lived, single-use exchange code goes in the URL, and the app
+    # trades it for the real token via POST /exchange once it lands on its
+    # deep link.
+    exchange_code = create_state({"access_token": access_token})
+
     separator = "&" if "?" in app_redirect_uri else "?"
-    return RedirectResponse(f"{app_redirect_uri}{separator}token={access_token}")
+    return RedirectResponse(f"{app_redirect_uri}{separator}code={exchange_code}")
+
+
+class ExchangeRequest(BaseModel):
+    code: str
+
+
+class ExchangeResponse(BaseModel):
+    access_token: str
+
+
+@router.post("/exchange", response_model=ExchangeResponse)
+async def google_exchange(request: ExchangeRequest):
+    """Trades the one-time code from the /callback redirect for the real
+    access token — see the comment in /callback for why the JWT itself
+    doesn't travel in that redirect's URL. Single-use: a replayed code fails
+    the same as an expired one."""
+    pending = consume_state(request.code)
+    if pending is None or "access_token" not in pending:
+        raise HTTPException(status_code=401, detail="Invalid or expired code")
+    return {"access_token": pending["access_token"]}

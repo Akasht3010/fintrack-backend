@@ -3,6 +3,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.money import Money
+
 AccountType = Literal["bank", "cash", "credit_card", "wallet", "investment"]
 
 # A ceiling, not a positivity constraint — a credit card can legitimately
@@ -15,11 +17,11 @@ class AccountCreate(BaseModel):
     type: AccountType
     # The app is INR-only; kept as a field so the row/response shape doesn't change.
     currency: str = "INR"
-    opening_balance: float = Field(default=0, ge=-MAX_OPENING_BALANCE, le=MAX_OPENING_BALANCE)
+    opening_balance: Money = Field(default=0, ge=-MAX_OPENING_BALANCE, le=MAX_OPENING_BALANCE)
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=60)
-    opening_balance: Optional[float] = Field(default=None, ge=-MAX_OPENING_BALANCE, le=MAX_OPENING_BALANCE)
+    opening_balance: Optional[Money] = Field(default=None, ge=-MAX_OPENING_BALANCE, le=MAX_OPENING_BALANCE)
     is_archived: Optional[bool] = None
 
 class AccountResponse(BaseModel):
@@ -27,8 +29,8 @@ class AccountResponse(BaseModel):
     name: str
     type: AccountType
     currency: str
-    opening_balance: float
-    balance: float
+    opening_balance: Money
+    balance: Money
     is_archived: bool
     created_at: datetime
 
@@ -38,10 +40,10 @@ class NetWorthAccountItem(BaseModel):
     id: int
     name: str
     type: AccountType
-    balance: float
+    balance: Money
 
 class NetWorthSummary(BaseModel):
-    net_worth: float
-    total_assets: float
-    total_liabilities: float
+    net_worth: Money
+    total_assets: Money
+    total_liabilities: Money
     accounts: list[NetWorthAccountItem]

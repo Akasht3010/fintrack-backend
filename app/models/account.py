@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey
 from app.config.database import Base
 from app.utils.timezone import now_ist
 
@@ -14,7 +14,8 @@ class Account(Base):
     name = Column(String, nullable=False)
     type = Column(String, nullable=False)  # bank, cash, credit_card, wallet, investment
     currency = Column(String, default="INR")
-    opening_balance = Column(Float, nullable=False, default=0)
+    # NUMERIC, not FLOAT — see the same note on Transaction.amount.
+    opening_balance = Column(Numeric(12, 2), nullable=False, default=0)
     is_archived = Column(Boolean, default=False)
     created_at = Column(DateTime, default=now_ist)
     updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)

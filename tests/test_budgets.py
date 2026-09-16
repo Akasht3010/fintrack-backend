@@ -43,7 +43,7 @@ def test_create_budget_rejects_a_second_budget_for_the_same_category_and_overlap
 
 
 def test_expired_budget_does_not_block_a_new_one_for_the_same_category(client, auth_headers):
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     from app.config.database import SessionLocal
     from app.models.budget import Budget
 
@@ -54,7 +54,9 @@ def test_expired_budget_does_not_block_a_new_one_for_the_same_category(client, a
     # 409 a fresh budget the user can't see to delete.
     db = SessionLocal()
     try:
-        past_end = datetime.utcnow() - timedelta(days=40)
+        # now_ist(), not datetime.utcnow() (deprecated, and inconsistent with
+        # the app's own naive-IST convention every other date in this file uses).
+        past_end = now_ist() - timedelta(days=40)
         db.add(Budget(
             user_id=user["id"], category="food", limit_amount=1000, spent_amount=0,
             period="monthly", start_date=past_end - timedelta(days=30), end_date=past_end

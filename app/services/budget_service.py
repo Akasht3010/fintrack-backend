@@ -1,3 +1,5 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
@@ -6,6 +8,8 @@ import calendar
 from app.models.budget import Budget
 from app.models.transaction import Transaction
 from app.utils.timezone import now_ist
+
+CENTS = Decimal("0.01")
 
 
 class DuplicateBudgetError(Exception):
@@ -27,9 +31,9 @@ def current_period_dates(period: str, now: datetime) -> tuple[datetime, datetime
     return start, end
 
 
-def compute_spent(db: Session, user_id: int, category: str, start_date: datetime, end_date: datetime) -> float:
+def compute_spent(db: Session, user_id: int, category: str, start_date: datetime, end_date: datetime) -> Decimal:
     """Total debit spend in this category within the budget window (all INR)."""
-    total = db.query(func.coalesce(func.sum(Transaction.amount), 0.0)).filter(
+    total = db.query(func.coalesce(func.sum(Transaction.amount), Decimal("0"))).filter(
         Transaction.user_id == user_id,
         Transaction.category == category,
         Transaction.type == "debit",
@@ -37,12 +41,12 @@ def compute_spent(db: Session, user_id: int, category: str, start_date: datetime
         Transaction.date <= end_date
     ).scalar()
 
-    return round(float(total or 0.0), 2)
+    return (total or Decimal("0")).quantize(CENTS, rounding=ROUND_HALF_UP)
 
 
 class BudgetService:
     @staticmethod
-    def create_budget(db: Session, user_id: int, category: str, limit_amount: float, period: str) -> Budget:
+    def create_budget(db: Session, user_id: int, category: str, limit_amount: Decimal, period: str) -> Budget:
         now = now_ist()
         start_date, end_date = current_period_dates(period, now)
 
@@ -129,7 +133,7 @@ class BudgetService:
         return db.query(Budget).filter(Budget.id == budget_id, Budget.user_id == user_id).first()
 
     @staticmethod
-    def update_limit(db: Session, budget: Budget, limit_amount: float) -> Budget:
+    def update_limit(db: Session, budget: Budget, limit_amount: Decimal) -> Budget:
         budget.limit_amount = limit_amount
         db.commit()
         db.refresh(budget)

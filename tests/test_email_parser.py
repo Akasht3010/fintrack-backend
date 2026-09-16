@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from app.services.email_parser import parse_bank_email
 
 
@@ -14,7 +16,7 @@ def test_upi_debit_with_named_payee_extracts_merchant_not_sender():
         snippet="Dear Customer, Greetings from HDFC Bank! Rs.181.60 is debited...",
         sender="HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
     )
-    assert result["amount"] == 181.60
+    assert result["amount"] == Decimal("181.60")
     assert result["type"] == "debit"
     assert result["merchant"] == "Dominos Pizza"
     assert result["description"] == "Paid to Dominos Pizza via UPI"
@@ -62,7 +64,7 @@ def test_neft_extracts_beneficiary_name_field():
         snippet="",
         sender="neftinfo.itps <neftinfo.itps@alerts.sbi.bank.in>",
     )
-    assert result["amount"] == 18000.0
+    assert result["amount"] == Decimal("18000.00")
     assert result["type"] == "debit"
     assert result["merchant"] == "AKASH KOTAK BANK"
     assert result["description"] == "Paid to AKASH KOTAK BANK via NEFT"

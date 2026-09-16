@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -14,7 +15,8 @@ from app.services.categorizer import categorize_merchant
 from app.services.budget_service import BudgetService
 from app.models.user import User
 from app.models.transaction import Transaction
-from app.utils.auth import get_current_user, verify_token
+from app.schemas.transaction import MAX_TRANSACTION_AMOUNT
+from app.utils.auth import get_current_user
 from app.utils.crypto import decrypt
 from app.utils.oauth_state import create_state, consume_state
 from app.utils.timezone import now_ist, to_ist_naive
@@ -27,15 +29,29 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
 CALLBACK_PATH = "/api/gmail/callback"
 
 
+@router.get("/link-token")
+async def gmail_link_token(current_user: User = Depends(get_current_user)):
+    """Mints a short-lived, single-use nonce identifying the caller, for
+    /authorize to consume. /authorize is opened as a top-level browser
+    navigation (WebBrowser.openAuthSessionAsync / window.location.href), which
+    can't attach an Authorization header — so this endpoint, called first over
+    a normal authenticated request, keeps the real bearer token out of that
+    navigation's URL (and therefore out of browser history and access logs);
+    only this one-time nonce travels there instead."""
+    link_token = create_state({"user_id": current_user.id})
+    return {"link_token": link_token}
+
+
 @router.get("/authorize")
 async def gmail_authorize(
-    token: str = Query(..., description="The user's own access token, so we know whose account to attach Gmail to"),
+    link_token: str = Query(..., description="One-time nonce from GET /api/gmail/link-token"),
     app_redirect_uri: str = Query(...)
 ):
     """Kick off Gmail's OAuth consent flow (readonly inbox access) for the current user."""
-    user_id = verify_token(token)
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    pending = consume_state(link_token)
+    if pending is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired link token")
+    user_id = pending["user_id"]
 
     # user_id and app_redirect_uri are bound server-side to a random nonce
     # rather than round-tripped through the client-decodable `state` blob —
@@ -76,8 +92,13 @@ async def gmail_disconnect(
     if current_user.gmail_refresh_token:
         try:
             gmail_service.revoke_token(decrypt(current_user.gmail_refresh_token))
-        except Exception:
-            pass
+        except Exception as e:
+            # Best-effort: a failed revoke shouldn't block disconnecting here
+            # either, but silently swallowing it means a systematically
+            # broken revoke path would never surface anywhere — at minimum
+            # this is a stale-grant hygiene issue (Google still shows the
+            # app as connected after the user "disconnected").
+            print(f"⚠️  Gmail token revoke failed on disconnect for user {current_user.id}: {e}")
 
     current_user.gmail_connected = False
     current_user.gmail_refresh_token = None
@@ -118,7 +139,7 @@ async def sync_gmail_emails(
     imported = 0
     skipped_duplicate = 0
     skipped_unparsed = 0
-    seen_this_sync: list[tuple[float, datetime]] = []
+    seen_this_sync: list[tuple[Decimal, datetime]] = []
     affected_categories = set()
 
     # One real purchase often generates several emails minutes apart — the
@@ -145,6 +166,14 @@ async def sync_gmail_emails(
             sender=email.get("from", "")
         )
         if not parsed:
+            skipped_unparsed += 1
+            continue
+
+        # The parser only checks amount > 0 — manual entry gets the full
+        # TransactionBase ceiling via the schema, but this path builds the
+        # ORM row directly and would otherwise let a mis-parsed or
+        # adversarial amount string through with no upper bound at all.
+        if parsed["amount"] > MAX_TRANSACTION_AMOUNT:
             skipped_unparsed += 1
             continue
 

@@ -28,6 +28,35 @@ def test_create_transaction_ignores_client_supplied_source_and_forces_manual(cli
     assert res.json()["source"] == "manual"
 
 
+def test_create_transaction_with_a_repeated_idempotency_key_is_rejected_not_duplicated(client, auth_headers):
+    """Regression test for a retried create (e.g. a mobile client resending
+    after a timeout, the first attempt having actually succeeded) — the
+    second attempt must 409, not silently insert a second transaction."""
+    headers, payload = _make_txn(auth_headers, idempotency_key="retry-key-1")
+    first = client.post("/api/transactions", json=payload, headers=headers)
+    assert first.status_code == 200, first.text
+
+    second = client.post("/api/transactions", json=payload, headers=headers)
+    assert second.status_code == 409
+
+    listed = client.get("/api/transactions", headers=headers).json()
+    assert listed["total"] == 1
+
+
+def test_create_transaction_without_an_idempotency_key_allows_identical_transactions(client, auth_headers):
+    """No key means no dedup — two genuinely separate manual entries that
+    happen to look identical (e.g. two coffees at the same cafe) must both
+    be allowed."""
+    headers, payload = _make_txn(auth_headers)
+    first = client.post("/api/transactions", json=payload, headers=headers)
+    second = client.post("/api/transactions", json=payload, headers=headers)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+
+    listed = client.get("/api/transactions", headers=headers).json()
+    assert listed["total"] == 2
+
+
 def test_create_transaction_rejects_unknown_category(client, auth_headers):
     headers, payload = _make_txn(auth_headers, category="not-a-real-category")
     res = client.post("/api/transactions", json=payload, headers=headers)

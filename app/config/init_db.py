@@ -90,11 +90,39 @@ def migrate_schema():
             # comparisons/filters against the real Integer FK values.
             conn.execute(text("ALTER TABLE transactions ADD COLUMN account_id INTEGER"))
 
+    if "idempotency_key" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE transactions ADD COLUMN idempotency_key VARCHAR"))
+
+    existing_transaction_index_names = {idx["name"] for idx in inspector.get_indexes("transactions")}
+    if "uq_transactions_user_idempotency_key" not in existing_transaction_index_names:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX uq_transactions_user_idempotency_key "
+                    "ON transactions (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
+                ))
+        except Exception as e:
+            print(f"⚠️  Could not create transaction idempotency_key index: {e}")
+
     if "users" in inspector.get_table_names():
         user_columns = {col["name"] for col in inspector.get_columns("users")}
         if "password_hash" not in user_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR"))
+
+        existing_user_index_names = {idx["name"] for idx in inspector.get_indexes("users")}
+        if "uq_users_phone" not in existing_user_index_names:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(
+                        "CREATE UNIQUE INDEX uq_users_phone ON users (phone) WHERE phone IS NOT NULL"
+                    ))
+            except Exception as e:
+                # Only fails if duplicate phone numbers already exist from
+                # before this constraint existed — don't block startup on
+                # cleaning that up, just leave the app running unconstrained.
+                print(f"⚠️  Could not create users.phone unique index (existing duplicates?): {e}")
 
     if "categories" in inspector.get_table_names():
         category_columns = {col["name"] for col in inspector.get_columns("categories")}
@@ -126,6 +154,41 @@ def migrate_schema():
                         ))
                 except Exception as e:
                     print(f"⚠️  Could not add budgets.remaining_amount generated column: {e}")
+
+    # float -> Decimal money columns: a fresh DB already gets NUMERIC(12,2)
+    # straight from create_all; an existing Postgres DB's FLOAT/DOUBLE
+    # PRECISION columns need an explicit ALTER ... TYPE with a USING cast.
+    # SQLite has no real column types to migrate (dynamic type affinity) and
+    # is only ever the test DB, which is always built fresh — skip it.
+    if engine.dialect.name == "postgresql":
+        money_columns = [
+            ("transactions", "amount"),
+            ("accounts", "opening_balance"),
+            ("budgets", "limit_amount"),
+            ("budgets", "spent_amount"),
+            ("budgets", "remaining_amount"),
+        ]
+        for table, column in money_columns:
+            if table not in inspector.get_table_names():
+                continue
+            col_info = next((c for c in inspector.get_columns(table) if c["name"] == column), None)
+            if col_info is None:
+                continue
+            current_type = str(col_info["type"]).upper()
+            if "FLOAT" not in current_type and "DOUBLE" not in current_type:
+                continue  # already NUMERIC — migrated on a previous boot
+            try:
+                with engine.begin() as conn:
+                    # remaining_amount is a generated column — its expression
+                    # (limit_amount - spent_amount) is untouched, only the
+                    # declared/stored type changes, so the same ALTER form
+                    # applies to it too.
+                    conn.execute(text(
+                        f"ALTER TABLE {table} ALTER COLUMN {column} TYPE NUMERIC(12,2) "
+                        f"USING {column}::numeric(12,2)"
+                    ))
+            except Exception as e:
+                print(f"⚠️  Could not migrate {table}.{column} to NUMERIC(12,2): {e}")
 
     existing_index_names = {idx["name"] for idx in inspector.get_indexes("transactions")}
     if "uq_transactions_user_raw_text" not in existing_index_names:

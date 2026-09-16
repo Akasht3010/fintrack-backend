@@ -13,6 +13,7 @@ os.environ.setdefault("OTP_EXPIRE_MINUTES", "5")
 os.environ.setdefault("OTP_RESEND_COOLDOWN_SECONDS", "30")
 os.environ.setdefault("ENCRYPTION_KEY", "MFRxU3ZTP7X4Sn3fJUvE8-3wztT-M8gEQPmWNz8kX_Q=")  # test-only Fernet key
 os.environ.setdefault("ENV", "development")  # send_otp_email's console fallback requires this explicitly
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # tests reuse one fake client IP across many /login calls
 
 import pytest
 from fastapi.testclient import TestClient

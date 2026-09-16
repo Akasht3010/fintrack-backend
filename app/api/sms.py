@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -7,6 +8,7 @@ from app.config.database import get_db
 from app.models.user import User
 from app.models.transaction import Transaction
 from app.schemas.sms import SmsSyncRequest, SmsSyncResponse
+from app.schemas.transaction import MAX_TRANSACTION_AMOUNT
 from app.services.email_parser import parse_bank_email
 from app.services.categorizer import categorize_merchant
 from app.services.budget_service import BudgetService
@@ -31,7 +33,7 @@ async def sync_sms_messages(
     imported = 0
     skipped_duplicate = 0
     skipped_unparsed = 0
-    seen_this_sync: list[tuple[float, datetime]] = []
+    seen_this_sync: list[tuple[Decimal, datetime]] = []
     affected_categories = set()
 
     # One purchase can produce an SMS and one or more emails minutes apart —
@@ -53,6 +55,13 @@ async def sync_sms_messages(
 
         parsed = parse_bank_email(subject="", body=body, snippet="", sender=message.address or "")
         if not parsed:
+            skipped_unparsed += 1
+            continue
+
+        # Same ceiling manual entry gets via the schema — this path builds
+        # the ORM row directly and would otherwise let a mis-parsed or
+        # adversarial amount string through unbounded.
+        if parsed["amount"] > MAX_TRANSACTION_AMOUNT:
             skipped_unparsed += 1
             continue
 

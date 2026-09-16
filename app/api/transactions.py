@@ -112,20 +112,23 @@ async def create_transaction(
         # higher-trust import.
         source="manual",
         raw_text=transaction.raw_text,
+        idempotency_key=transaction.idempotency_key,
         is_recurring=transaction.is_recurring
     )
     db.add(db_transaction)
     try:
         db.commit()
     except IntegrityError:
-        # Same (user_id, raw_text) dedup index the Gmail/SMS sync endpoints
-        # rely on — a direct API call can hit it too (raw_text is
-        # client-settable), so it needs the same graceful handling rather
-        # than surfacing as an unhandled 500.
+        # Two dedup indexes can raise here: (user_id, raw_text) — the
+        # Gmail/SMS sync endpoints' marker, which a direct API call can also
+        # hit since raw_text is client-settable — and (user_id,
+        # idempotency_key), which exists specifically so a retried create
+        # (e.g. a mobile client resending after a timeout, the first attempt
+        # having actually succeeded) 409s instead of double-inserting.
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A transaction with this raw_text already exists for this account"
+            detail="A transaction with this raw_text or idempotency_key already exists"
         )
     db.refresh(db_transaction)
     BudgetService.sync_for_categories(db, current_user.id, db_transaction.category)
