@@ -74,7 +74,12 @@ steps:
       - --memory=512Mi
       - --min-instances=0
       - --max-instances=4
-      - --set-env-vars=ENV=production,ACCESS_TOKEN_EXPIRE_MINUTES=30,OTP_EXPIRE_MINUTES=5,OTP_RESEND_COOLDOWN_SECONDS=30,PUBLIC_BASE_URL=${_APP_URL},CORS_ORIGINS=${_APP_URL},SMTP_HOST=smtp.gmail.com,SMTP_PORT=587
+      # CORS_ORIGINS needs multiple comma-separated origins (this env, plus the
+      # fintrack-monitor ops dashboard on Firebase Hosting calling the admin
+      # API cross-origin) — the `^;^` prefix swaps gcloud's --set-env-vars pair
+      # separator from `,` to `;` so those commas land inside the value instead
+      # of being parsed as separate vars.
+      - --set-env-vars=^;^ENV=production;ACCESS_TOKEN_EXPIRE_MINUTES=30;OTP_EXPIRE_MINUTES=5;OTP_RESEND_COOLDOWN_SECONDS=30;PUBLIC_BASE_URL=${_APP_URL};CORS_ORIGINS=${_APP_URL},https://fintrack-monitor.web.app,https://fintrack-monitor.firebaseapp.com;SMTP_HOST=smtp.gmail.com;SMTP_PORT=587
       - --set-secrets=DATABASE_URL=${_SECRET_PREFIX}-database-url:latest,SECRET_KEY=${_SECRET_PREFIX}-secret-key:latest,ENCRYPTION_KEY=${_SECRET_PREFIX}-encryption-key:latest,GOOGLE_CLIENT_ID=${_SECRET_PREFIX}-google-client-id:latest,GOOGLE_CLIENT_SECRET=${_SECRET_PREFIX}-google-client-secret:latest,SMTP_USER=${_SECRET_PREFIX}-smtp-user:latest,SMTP_PASSWORD=${_SECRET_PREFIX}-smtp-password:latest,SMTP_FROM=${_SECRET_PREFIX}-smtp-from:latest,ADMIN_API_KEY=${_SECRET_PREFIX}-admin-api-key:latest
 
 images:
