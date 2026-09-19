@@ -7,7 +7,7 @@ import os
 # process shares the same in-memory DB rather than each getting its own
 # (SQLite's normal :memory: behavior is connection-scoped).
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-os.environ["SECRET_KEY"] = "test-secret-key-for-pytest-only"
+os.environ["SECRET_KEY"] = "test-secret-key-for-pytest-only-32b"
 os.environ.setdefault("CORS_ORIGINS", "")
 os.environ.setdefault("OTP_EXPIRE_MINUTES", "5")
 os.environ.setdefault("OTP_RESEND_COOLDOWN_SECONDS", "30")
