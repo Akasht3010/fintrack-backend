@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from app.utils.timezone import now_ist
 
 
@@ -22,9 +24,9 @@ def test_create_budget(client, auth_headers):
     res = client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers)
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["limit_amount"] == 5000
-    assert body["spent_amount"] == 0
-    assert body["remaining_amount"] == 5000
+    assert Decimal(body["limit_amount"]) == Decimal("5000")
+    assert Decimal(body["spent_amount"]) == Decimal("0")
+    assert Decimal(body["remaining_amount"]) == Decimal("5000")
 
 
 def test_create_budget_rejects_unknown_category(client, auth_headers):
@@ -70,7 +72,7 @@ def test_expired_budget_does_not_block_a_new_one_for_the_same_category(client, a
 
     listed = client.get("/api/budgets", headers=headers).json()
     assert len(listed) == 1
-    assert listed[0]["limit_amount"] == 5000
+    assert Decimal(listed[0]["limit_amount"]) == Decimal("5000")
 
 
 def test_different_categories_can_each_have_a_budget(client, auth_headers):
@@ -105,7 +107,7 @@ def test_budget_spend_reflects_matching_debit_transactions_only(client, auth_hea
     assert res.status_code == 200
     budgets = res.json()
     assert len(budgets) == 1
-    assert budgets[0]["spent_amount"] == 300.0
+    assert Decimal(budgets[0]["spent_amount"]) == Decimal("300.00")
 
 
 def test_spent_amount_is_materialized_onto_the_db_row(client, auth_headers):
@@ -133,7 +135,7 @@ def test_spent_amount_is_materialized_onto_the_db_row(client, auth_headers):
 def test_remaining_amount_tracks_limit_minus_spent(client, auth_headers):
     headers, user = auth_headers
     created = client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers).json()
-    assert created["remaining_amount"] == 5000
+    assert Decimal(created["remaining_amount"]) == Decimal("5000")
 
     client.post("/api/transactions", json={
         "amount": 1200.0, "currency": "INR", "type": "debit", "category": "food",
@@ -141,14 +143,14 @@ def test_remaining_amount_tracks_limit_minus_spent(client, auth_headers):
     }, headers=headers)
 
     listed = client.get("/api/budgets", headers=headers).json()[0]
-    assert listed["spent_amount"] == 1200.0
-    assert listed["remaining_amount"] == 3800.0
+    assert Decimal(listed["spent_amount"]) == Decimal("1200.00")
+    assert Decimal(listed["remaining_amount"]) == Decimal("3800.00")
     # The DB row carries it too — it's a generated column, not app-computed.
     assert [b.remaining_amount for b in _budget_row(user["id"])] == [3800.0]
 
     # Raising the limit lifts remaining without any extra write path.
     client.patch(f"/api/budgets/{listed['id']}", json={"limit_amount": 8000}, headers=headers)
-    assert client.get("/api/budgets", headers=headers).json()[0]["remaining_amount"] == 6800.0
+    assert Decimal(client.get("/api/budgets", headers=headers).json()[0]["remaining_amount"]) == Decimal("6800.00")
 
 
 def test_recategorizing_a_transaction_moves_spend_between_budgets(client, auth_headers):
@@ -173,7 +175,7 @@ def test_update_budget_limit(client, auth_headers):
     created = client.post("/api/budgets", json={"category": "food", "limit_amount": 5000, "period": "monthly"}, headers=headers).json()
     res = client.patch(f"/api/budgets/{created['id']}", json={"limit_amount": 7000}, headers=headers)
     assert res.status_code == 200
-    assert res.json()["limit_amount"] == 7000
+    assert Decimal(res.json()["limit_amount"]) == Decimal("7000")
 
 
 def test_delete_budget(client, auth_headers):

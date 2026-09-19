@@ -53,7 +53,7 @@ def test_account_balance_has_no_float_drift_across_many_transactions(client, aut
         assert res.status_code == 200, res.text
 
     updated = client.get("/api/accounts", headers=headers).json()[0]
-    assert updated["balance"] == 7.0
+    assert Decimal(updated["balance"]) == Decimal("7.00")
 
     # Recompute independently of the API response (which round-trips through
     # the float-serializing wire format) to prove the stored figure itself,
@@ -90,12 +90,12 @@ def test_budget_spent_amount_has_no_float_drift(client, auth_headers):
         db.close()
 
 
-def test_amount_travels_on_the_wire_as_a_json_number_not_a_string(client, auth_headers):
-    """The frontend contract stays unchanged: Decimal is exact server-side,
-    but Pydantic's response serialization must keep emitting a plain JSON
-    number for `amount`/`balance`/etc, not the string Pydantic v2 defaults
-    to for a bare Decimal field — every existing frontend numeric consumer
-    (charts, sorting, budget math, CSV) depends on this."""
+def test_amount_travels_on_the_wire_as_a_json_string_not_a_lossy_number(client, auth_headers):
+    """Amount fields serialize as a JSON string ("19.99"), not a JSON number
+    — a JSON number is a float on every consumer, including this app's own
+    frontend, which would otherwise inherit float drift the moment it does
+    arithmetic on a value that started out as an exact server-side Decimal.
+    Clients must parse this with a decimal library, not `parseFloat`/`+`."""
     headers, _ = auth_headers
     res = client.post("/api/transactions", json={
         "amount": 19.99, "currency": "INR", "type": "debit", "category": "food",
@@ -105,4 +105,5 @@ def test_amount_travels_on_the_wire_as_a_json_number_not_a_string(client, auth_h
     assert res.status_code == 200, res.text
 
     raw = json.loads(res.text)
-    assert isinstance(raw["amount"], float)
+    assert isinstance(raw["amount"], str)
+    assert Decimal(raw["amount"]) == Decimal("19.99")

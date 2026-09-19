@@ -8,7 +8,7 @@ def test_create_account(client, auth_headers):
     }, headers=headers)
     assert res.status_code == 201, res.text
     body = res.json()
-    assert body["balance"] == 1000
+    assert Decimal(body["balance"]) == Decimal("1000")
     assert body["is_archived"] is False
 
 
@@ -31,7 +31,7 @@ def test_account_balance_increases_with_credits_and_decreases_with_debits(client
 
     res = client.get("/api/accounts", headers=headers)
     updated = res.json()[0]
-    assert updated["balance"] == 1000 + 500 - 200
+    assert Decimal(updated["balance"]) == Decimal("1000") + Decimal("500") - Decimal("200")
 
 
 def test_list_accounts_computes_each_accounts_balance_independently(client, auth_headers):
@@ -78,7 +78,7 @@ def test_credit_card_balance_moves_opposite_to_asset_accounts(client, auth_heade
     }, headers=headers)
 
     res = client.get("/api/accounts", headers=headers)
-    assert res.json()[0]["balance"] == 1500.0
+    assert Decimal(res.json()[0]["balance"]) == Decimal("1500")
 
 
 def test_net_worth_subtracts_credit_card_balance_from_bank_balance(client, auth_headers):
@@ -98,9 +98,9 @@ def test_net_worth_subtracts_credit_card_balance_from_bank_balance(client, auth_
     res = client.get("/api/accounts/net-worth", headers=headers)
     assert res.status_code == 200
     body = res.json()
-    assert body["total_assets"] == 10000
-    assert body["total_liabilities"] == 3000
-    assert body["net_worth"] == 7000
+    assert Decimal(body["total_assets"]) == Decimal("10000")
+    assert Decimal(body["total_liabilities"]) == Decimal("3000")
+    assert Decimal(body["net_worth"]) == Decimal("7000")
 
 
 def test_archived_accounts_are_excluded_from_the_default_list(client, auth_headers):

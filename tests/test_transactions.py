@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+
 def _make_txn(headers_and_user, **overrides):
     headers, _ = headers_and_user
     payload = {
@@ -14,7 +17,7 @@ def test_create_transaction(client, auth_headers):
     res = client.post("/api/transactions", json=payload, headers=headers)
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["amount"] == 250.0
+    assert Decimal(body["amount"]) == Decimal("250.00")
     assert body["category"] == "food"
 
 
