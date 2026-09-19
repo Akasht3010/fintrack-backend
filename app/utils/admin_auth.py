@@ -1,11 +1,18 @@
 import hmac
 import os
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Request, status
+
+from app.utils.rate_limit import limiter
 
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 
 
-def require_admin_key(x_admin_key: str = Header(...)):
+# Applied to the dependency itself (not the route) so a wrong key is
+# throttled before it ever reaches the route — a @limiter.limit() on the
+# route function only runs once dependencies have already succeeded, which
+# would let repeated wrong-key attempts through unthrottled.
+@limiter.limit("30/minute")
+def require_admin_key(request: Request, x_admin_key: str = Header(...)):
     """Gate for the /api/admin/* routes. Separate from user JWT auth since
     there's no is_admin concept on User yet — a single shared key, like the
     monitoring dashboard checking in, not a user session."""
