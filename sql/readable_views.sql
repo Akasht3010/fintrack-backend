@@ -67,5 +67,5 @@ ORDER BY b.created_at DESC;
 
 -- Example usage after creating these:
 --   SELECT * FROM v_users;
---   SELECT * FROM v_transactions WHERE user_email = 'akashthakkar931@gmail.com' LIMIT 50;
+--   SELECT * FROM v_transactions WHERE user_email = 'someone@example.com' LIMIT 50;
 --   SELECT * FROM v_transactions WHERE merchant ILIKE '%swiggy%';
