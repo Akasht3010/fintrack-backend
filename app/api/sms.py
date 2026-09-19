@@ -100,6 +100,9 @@ async def sync_sms_messages(
         )
         db.add(transaction)
         try:
+            # Committed per-message on purpose, same rationale as Gmail
+            # sync: a failure further down the loop should never roll back
+            # messages already counted as imported in this response.
             db.commit()
             imported += 1
             affected_categories.add(transaction.category)

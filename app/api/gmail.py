@@ -19,6 +19,7 @@ from app.models.transaction import Transaction
 from app.schemas.transaction import MAX_TRANSACTION_AMOUNT
 from app.utils.auth import get_current_user
 from app.utils.crypto import decrypt
+from app.schemas.gmail import GmailDisconnectResponse, GmailSyncResponse
 from app.utils.oauth_state import create_state, consume_state
 from app.utils.redirect_validation import validate_app_redirect_uri
 from app.utils.timezone import now_ist, to_ist_naive
@@ -93,7 +94,7 @@ async def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
     return RedirectResponse(f"{app_redirect_uri}{separator}gmail_connected=true")
 
 
-@router.post("/disconnect")
+@router.post("/disconnect", response_model=GmailDisconnectResponse)
 async def gmail_disconnect(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -116,7 +117,7 @@ async def gmail_disconnect(
 
     return {"gmail_connected": False}
 
-@router.post("/sync")
+@router.post("/sync", response_model=GmailSyncResponse)
 async def sync_gmail_emails(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -233,6 +234,13 @@ async def sync_gmail_emails(
         )
         db.add(transaction)
         try:
+            # Committed per-message rather than batched at the end of the
+            # sync on purpose: a sync can process hundreds of emails, and if
+            # one further down throws (a parser edge case, a DB hiccup) a
+            # single end-of-loop commit would roll back every import already
+            # counted as successful in this response. Per-message commits
+            # give partial-success semantics — whatever got this far stays
+            # imported — at the cost of one extra round trip per message.
             db.commit()
             imported += 1
             affected_categories.add(transaction.category)
