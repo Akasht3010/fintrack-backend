@@ -1,3 +1,4 @@
+import re
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -19,7 +20,11 @@ if not DATABASE_URL:
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-print(f"📦 Using database: {DATABASE_URL}")
+# A Postgres URL embeds the password in plaintext (postgresql://user:pass@host/db)
+# -- mask it before this ever reaches a log, even though nothing external
+# currently captures stdout here.
+_masked_database_url = re.sub(r"(://[^:/@]+:)[^@]+(@)", r"\1***\2", DATABASE_URL)
+print(f"📦 Using database: {_masked_database_url}")
 
 # Create engine
 if DATABASE_URL.startswith("postgresql"):
