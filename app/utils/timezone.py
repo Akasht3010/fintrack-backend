@@ -9,10 +9,12 @@ from zoneinfo import ZoneInfo
 # that writes or reasons about those columns should go through here rather
 # than calling datetime.utcnow()/datetime.now() directly.
 #
-# Deliberately NOT used for JWT/OTP expiry timing (see app/utils/auth.py,
-# app/services/otp_service.py) -- those compare a self-consistent pair of
-# UTC instants and stay on datetime.utcnow(), since PyJWT's own expiry
-# check assumes UTC and mixing conventions there risks real auth bugs.
+# Deliberately not used for JWT expiry timing (see app/utils/auth.py, which
+# uses datetime.now(timezone.utc) instead) -- PyJWT's own expiry check
+# assumes UTC, and mixing in the app's IST convention there risks real auth
+# bugs. OTP expiry (app/services/otp_service.py) is the one exception: it
+# compares a self-consistent pair of now_ist() values instead, which is
+# fine on its own terms since nothing there is UTC-denominated.
 IST = ZoneInfo("Asia/Kolkata")
 
 
