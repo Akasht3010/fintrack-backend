@@ -1,6 +1,7 @@
 import csv
 import io
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -50,8 +51,8 @@ def _apply_filters(
     q: Optional[str],
     date_from: Optional[datetime],
     date_to: Optional[datetime],
-    min_amount: Optional[float],
-    max_amount: Optional[float],
+    min_amount: Optional[Decimal],
+    max_amount: Optional[Decimal],
     source: Optional[str] = None,
     type: Optional[str] = None
 ) -> SAQuery:
@@ -142,8 +143,8 @@ async def list_transactions(
     q: Optional[str] = Query(None, description="Search merchant or description"),
     date_from: Optional[datetime] = Query(None),
     date_to: Optional[datetime] = Query(None),
-    min_amount: Optional[float] = Query(None),
-    max_amount: Optional[float] = Query(None),
+    min_amount: Optional[Decimal] = Query(None),
+    max_amount: Optional[Decimal] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -170,8 +171,8 @@ async def export_transactions(
     q: Optional[str] = Query(None),
     date_from: Optional[datetime] = Query(None),
     date_to: Optional[datetime] = Query(None),
-    min_amount: Optional[float] = Query(None),
-    max_amount: Optional[float] = Query(None),
+    min_amount: Optional[Decimal] = Query(None),
+    max_amount: Optional[Decimal] = Query(None),
     source: Optional[str] = Query(None, description="manual, gmail, sms, or aa"),
     type: Optional[str] = Query(None, description="debit or credit"),
     current_user: User = Depends(get_current_user),
