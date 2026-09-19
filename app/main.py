@@ -1,8 +1,8 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from app.config.database import Base, engine
@@ -29,7 +29,19 @@ app = FastAPI(
 )
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    # slowapi's default handler returns {"error": ...}, unlike every other
+    # error path in this API ({"detail": ...}) — clients that only read
+    # `detail` (this app's own frontend included) silently drop the message.
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.detail}"},
+    )
+
+
 app.add_middleware(SlowAPIMiddleware)
 
 # The mobile app itself isn't subject to CORS (browsers enforce it, not RN's
