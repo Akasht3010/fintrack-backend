@@ -31,6 +31,35 @@ def test_account_balance_increases_with_credits_and_decreases_with_debits(client
     assert updated["balance"] == 1000 + 500 - 200
 
 
+def test_list_accounts_computes_each_accounts_balance_independently(client, auth_headers):
+    """Regression test for B-P2-1: balances are now computed in one bulk
+    GROUP BY query across every listed account instead of two SUM() queries
+    per account — this would silently mix up totals across accounts if the
+    grouping were wrong."""
+    headers, _ = auth_headers
+    wallet = client.post("/api/accounts", json={
+        "name": "Wallet", "type": "cash", "currency": "INR", "opening_balance": 100
+    }, headers=headers).json()
+    card = client.post("/api/accounts", json={
+        "name": "Card", "type": "credit_card", "currency": "INR", "opening_balance": 0
+    }, headers=headers).json()
+
+    client.post("/api/transactions", json={
+        "amount": 30.0, "currency": "INR", "type": "debit", "category": "food",
+        "merchant": "Cafe", "description": "lunch", "date": "2026-08-01T12:00:00",
+        "source": "manual", "account_id": wallet["id"]
+    }, headers=headers)
+    client.post("/api/transactions", json={
+        "amount": 200.0, "currency": "INR", "type": "debit", "category": "shopping",
+        "merchant": "Store", "description": "purchase", "date": "2026-08-01T12:00:00",
+        "source": "manual", "account_id": card["id"]
+    }, headers=headers)
+
+    accounts = {a["id"]: a for a in client.get("/api/accounts", headers=headers).json()}
+    assert Decimal(accounts[wallet["id"]]["balance"]) == Decimal("70")
+    assert Decimal(accounts[card["id"]]["balance"]) == Decimal("200")
+
+
 def test_credit_card_balance_moves_opposite_to_asset_accounts(client, auth_headers):
     """A credit card's `balance` is what's owed: a purchase (debit) increases
     it, a payment (credit) decreases it — the reverse of a bank account."""
@@ -83,6 +112,48 @@ def test_archived_accounts_are_excluded_from_the_default_list(client, auth_heade
 
     included = client.get("/api/accounts", params={"include_archived": True}, headers=headers)
     assert len(included.json()) == 1
+
+
+def test_cannot_read_another_users_account(client, auth_headers, signup):
+    """Regression test for coverage flagged in the review: accounts share
+    the same get_own(user_id, account_id) ownership-scoping pattern already
+    tested for transactions/budgets, but had no test of its own."""
+    headers, _ = auth_headers
+    account = client.post("/api/accounts", json={
+        "name": "Private", "type": "bank", "currency": "INR", "opening_balance": 500
+    }, headers=headers).json()
+
+    other_token, _ = signup(email="nosy@example.com", phone="9876543298")
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    list_res = client.get("/api/accounts", headers=other_headers)
+    assert account["id"] not in [a["id"] for a in list_res.json()]
+
+
+def test_cannot_update_another_users_account(client, auth_headers, signup):
+    headers, _ = auth_headers
+    account = client.post("/api/accounts", json={
+        "name": "Private", "type": "bank", "currency": "INR", "opening_balance": 500
+    }, headers=headers).json()
+
+    other_token, _ = signup(email="nosy2@example.com", phone="9876543299")
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    res = client.patch(f"/api/accounts/{account['id']}", json={"name": "Hijacked"}, headers=other_headers)
+    assert res.status_code == 404
+
+
+def test_cannot_delete_another_users_account(client, auth_headers, signup):
+    headers, _ = auth_headers
+    account = client.post("/api/accounts", json={
+        "name": "Private", "type": "bank", "currency": "INR", "opening_balance": 500
+    }, headers=headers).json()
+
+    other_token, _ = signup(email="nosy3@example.com", phone="9876543201")
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    res = client.delete(f"/api/accounts/{account['id']}", headers=other_headers)
+    assert res.status_code == 404
 
 
 def test_deleting_an_account_still_referenced_by_a_transaction_is_blocked(client, auth_headers):

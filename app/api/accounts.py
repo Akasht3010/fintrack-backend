@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, NetWorthSummary
-from app.services.account_service import AccountInUseError, AccountService
+from app.services.account_service import AccountInUseError, AccountService, compute_balances
 from app.utils.auth import get_current_user
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -17,7 +17,8 @@ async def list_accounts(
 ):
     """List the authenticated user's accounts (active only, unless include_archived=true), with live balances."""
     accounts = AccountService.list_visible(db, current_user.id, include_archived)
-    return [AccountService.to_response(db, a) for a in accounts]
+    balances = compute_balances(db, accounts)
+    return [AccountService.to_response(db, a, balances[a.id]) for a in accounts]
 
 @router.get("/net-worth", response_model=NetWorthSummary)
 async def get_net_worth(

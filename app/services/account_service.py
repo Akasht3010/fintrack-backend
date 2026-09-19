@@ -19,19 +19,47 @@ def _sum_for_type(db: Session, account: Account, transaction_type: str) -> Decim
     return total or Decimal("0")
 
 
-def compute_balance(db: Session, account: Account) -> Decimal:
+def _balance_from_sums(account: Account, credits: Decimal, debits: Decimal) -> Decimal:
     """
     For asset accounts, balance is money held: opening_balance + credits - debits.
     For credit_card accounts, balance is money owed, which moves the other way —
     a purchase (debit) increases what's owed, a payment (credit) reduces it —
     so the terms flip: opening_balance + debits - credits.
     """
-    credits = _sum_for_type(db, account, "credit")
-    debits = _sum_for_type(db, account, "debit")
-
     if account.type in LIABILITY_TYPES:
         return account.opening_balance + debits - credits
     return account.opening_balance + credits - debits
+
+
+def compute_balance(db: Session, account: Account) -> Decimal:
+    credits = _sum_for_type(db, account, "credit")
+    debits = _sum_for_type(db, account, "debit")
+    return _balance_from_sums(account, credits, debits)
+
+
+def compute_balances(db: Session, accounts: list[Account]) -> dict[int, Decimal]:
+    """Bulk version of compute_balance: one GROUP BY query for however many
+    accounts are being listed, instead of two SUM() queries per account
+    (previously run once per account on every GET /api/accounts and
+    GET /api/accounts/net-worth call)."""
+    if not accounts:
+        return {}
+
+    sums = {account.id: {"credit": Decimal("0"), "debit": Decimal("0")} for account in accounts}
+    rows = (
+        db.query(Transaction.account_id, Transaction.type, func.sum(Transaction.amount))
+        .filter(Transaction.account_id.in_(sums.keys()))
+        .group_by(Transaction.account_id, Transaction.type)
+        .all()
+    )
+    for account_id, transaction_type, total in rows:
+        if account_id in sums and transaction_type in sums[account_id]:
+            sums[account_id][transaction_type] = total or Decimal("0")
+
+    return {
+        account.id: _balance_from_sums(account, sums[account.id]["credit"], sums[account.id]["debit"])
+        for account in accounts
+    }
 
 
 class AccountService:
@@ -81,14 +109,14 @@ class AccountService:
         db.commit()
 
     @staticmethod
-    def to_response(db: Session, account: Account) -> dict:
+    def to_response(db: Session, account: Account, balance: Decimal | None = None) -> dict:
         return {
             "id": account.id,
             "name": account.name,
             "type": account.type,
             "currency": account.currency,
             "opening_balance": account.opening_balance,
-            "balance": compute_balance(db, account),
+            "balance": balance if balance is not None else compute_balance(db, account),
             "is_archived": account.is_archived,
             "created_at": account.created_at
         }
@@ -97,12 +125,13 @@ class AccountService:
     def net_worth(db: Session, user_id: int) -> dict:
         """Asset balances minus liability balances (all INR)."""
         accounts = AccountService.list_visible(db, user_id)
+        balances = compute_balances(db, accounts)
 
         total_assets = Decimal("0")
         total_liabilities = Decimal("0")
         items = []
         for account in accounts:
-            balance = compute_balance(db, account)
+            balance = balances[account.id]
             if account.type in LIABILITY_TYPES:
                 total_liabilities += balance
             else:
