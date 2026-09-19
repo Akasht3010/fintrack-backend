@@ -47,7 +47,18 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def verify_token(token: str) -> Optional[int]:
+
+def create_user_access_token(user: User) -> str:
+    """The one place that mints a real (non-pending) access token for a
+    logged-in user — always embeds the user's current token_version so every
+    caller participates in revocation (get_current_user rejects a token
+    whose "tv" doesn't match the user's current value). Call sites must use
+    this instead of create_access_token directly, or a newly-issued token
+    would bypass revocation entirely."""
+    return create_access_token(data={"sub": user.id, "tv": user.token_version})
+
+
+def verify_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         # Pending tokens (see create_pending_token) carry a "purpose" claim
@@ -59,7 +70,7 @@ def verify_token(token: str) -> Optional[int]:
         sub = payload.get("sub")
         if sub is None:
             return None
-        return int(sub)
+        return {"user_id": int(sub), "token_version": payload.get("tv")}
     except (jwt.InvalidTokenError, ValueError):
         return None
 
@@ -101,12 +112,18 @@ def get_current_user(
     db: Session = Depends(get_db)
 ) -> User:
     """FastAPI dependency: resolves the bearer token to the authenticated User, or 401s."""
-    user_id = verify_token(credentials.credentials)
-    if user_id is None:
+    payload = verify_token(credentials.credentials)
+    if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == payload["user_id"]).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    if payload["token_version"] != user.token_version:
+        # Token predates a password reset / explicit "log out everywhere"
+        # (see reset_password and the /logout route) — still
+        # signature-valid and unexpired, but no longer honored.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     return user

@@ -111,6 +111,12 @@ def migrate_schema():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR"))
 
+        if "token_version" not in user_columns:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1"
+                ))
+
         existing_user_index_names = {idx["name"] for idx in inspector.get_indexes("users")}
         if "uq_users_phone" not in existing_user_index_names:
             try:

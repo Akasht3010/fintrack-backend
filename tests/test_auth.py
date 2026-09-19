@@ -257,3 +257,71 @@ def test_delete_me_also_removes_the_users_transactions(client, signup):
         "password": "TestPass123!", "confirm_password": "TestPass123!"
     })
     assert resignup.status_code == 200, resignup.text
+
+
+def test_refresh_issues_a_new_working_token(client, signup):
+    token, _ = signup(email="nolan@example.com", phone="9876543210")
+    res = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200, res.text
+    new_token = res.json()["access_token"]
+
+    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {new_token}"})
+    assert me_res.status_code == 200
+    assert me_res.json()["email"] == "nolan@example.com"
+
+
+def test_logout_invalidates_the_token_that_called_it(client, signup):
+    token, _ = signup(email="oscar@example.com", phone="9876543210")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    logout_res = client.post("/api/auth/logout", headers=headers)
+    assert logout_res.status_code == 200, logout_res.text
+
+    me_res = client.get("/api/auth/me", headers=headers)
+    assert me_res.status_code == 401
+
+
+def test_logout_invalidates_every_outstanding_token_not_just_the_caller(client, signup):
+    """Regression test for B-P0-1: logout has to be "log out everywhere" —
+    a second, still-unexpired token minted before logout (e.g. another
+    device, or one grabbed via /refresh) must stop working too."""
+    token, _ = signup(email="peggy@example.com", phone="9876543210")
+
+    refresh_res = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {token}"})
+    other_token = refresh_res.json()["access_token"]
+
+    client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})
+
+    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {other_token}"})
+    assert me_res.status_code == 401
+
+
+def test_refresh_after_logout_is_rejected(client, signup):
+    token, _ = signup(email="quinn@example.com", phone="9876543210")
+    client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})
+
+    res = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 401
+
+
+def test_password_reset_invalidates_tokens_issued_before_it(client, signup, captured_otp):
+    """Regression test for B-P0-1: previously, resetting a password changed
+    password_hash but left every outstanding access token (e.g. one an
+    attacker stole before the reset) valid until its natural expiry."""
+    old_token, _ = signup(email="rachel@example.com", phone="9876543210", password="OldPass123!")
+
+    forgot_res = client.post("/api/auth/forgot-password", json={"identifier": "rachel@example.com"})
+    pending_token = forgot_res.json()["pending_token"]
+
+    reset_res = client.post("/api/auth/reset-password", json={
+        "pending_token": pending_token, "code": captured_otp["code"],
+        "new_password": "NewPass123!", "confirm_new_password": "NewPass123!"
+    })
+    assert reset_res.status_code == 200, reset_res.text
+
+    old_token_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {old_token}"})
+    assert old_token_res.status_code == 401
+
+    new_token = reset_res.json()["access_token"]
+    new_token_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {new_token}"})
+    assert new_token_res.status_code == 200

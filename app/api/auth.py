@@ -8,7 +8,7 @@ from app.services.user_service import UserService, DuplicateUserError, normalize
 from app.services.gmail_service import GmailService
 from app.services.otp_service import issue_otp, verify_otp as verify_otp_code, OtpError
 from app.utils.auth import (
-    create_access_token,
+    create_user_access_token,
     create_pending_token,
     decode_pending_token,
     verify_pending_token,
@@ -144,13 +144,14 @@ class UpdateProfileRequest(BaseModel):
         return digits
 
 @router.post("/signup", response_model=SignupResponse)
-async def signup(request: SignupRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db)):
     """Create a new user account. Fails if the email or phone is already registered."""
     user_create = UserCreate(
-        name=request.name,
-        email=request.email,
-        phone=request.phone,
-        password=request.password
+        name=body.name,
+        email=body.email,
+        phone=body.phone,
+        password=body.password
     )
 
     try:
@@ -163,7 +164,7 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
         )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
-    access_token = create_access_token(data={"sub": user.id})
+    access_token = create_user_access_token(user)
 
     return {
         "access_token": access_token,
@@ -218,9 +219,10 @@ async def login(request: Request, body: LoginRequest, background_tasks: Backgrou
 
 
 @router.post("/verify-otp", response_model=LoginResponse)
-async def verify_otp_endpoint(request: VerifyOtpRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def verify_otp_endpoint(request: Request, body: VerifyOtpRequest, db: Session = Depends(get_db)):
     """Step 2 of login: check the emailed code and, on success, issue the real access token."""
-    user_id = verify_pending_token(request.pending_token, purpose=OTP_LOGIN_PURPOSE)
+    user_id = verify_pending_token(body.pending_token, purpose=OTP_LOGIN_PURPOSE)
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Verification session expired. Please log in again.")
 
@@ -229,11 +231,11 @@ async def verify_otp_endpoint(request: VerifyOtpRequest, db: Session = Depends(g
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
     try:
-        verify_otp_code(db, user_id, request.code, purpose=OTP_LOGIN_PURPOSE)
+        verify_otp_code(db, user_id, body.code, purpose=OTP_LOGIN_PURPOSE)
     except OtpError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
 
-    access_token = create_access_token(data={"sub": user.id})
+    access_token = create_user_access_token(user)
 
     return {
         "access_token": access_token,
@@ -242,10 +244,11 @@ async def verify_otp_endpoint(request: VerifyOtpRequest, db: Session = Depends(g
 
 
 @router.post("/resend-otp")
-async def resend_otp_endpoint(request: ResendOtpRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def resend_otp_endpoint(request: Request, body: ResendOtpRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Shared by the login and password-reset flows — reissues a code for
     whichever purpose the pending token was already scoped to."""
-    payload = decode_pending_token(request.pending_token)
+    payload = decode_pending_token(body.pending_token)
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_SESSION_EXPIRED_MESSAGE)
 
@@ -305,10 +308,11 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest, backgro
 
 
 @router.post("/reset-password", response_model=LoginResponse)
-async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def reset_password(request: Request, body: ResetPasswordRequest, db: Session = Depends(get_db)):
     """Step 2 of password reset: check the emailed code, set the new password,
     and log the user straight in (the OTP already proved email ownership)."""
-    user_id = verify_pending_token(request.pending_token, purpose=OTP_PASSWORD_RESET_PURPOSE)
+    user_id = verify_pending_token(body.pending_token, purpose=OTP_PASSWORD_RESET_PURPOSE)
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_SESSION_EXPIRED_MESSAGE)
 
@@ -318,7 +322,7 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
         # has an OTP row to match) fails here with the same "no pending
         # code" error a real account gets for a missing/expired code —
         # rather than a distinguishable "account not found" first.
-        verify_otp_code(db, user_id, request.code, purpose=OTP_PASSWORD_RESET_PURPOSE)
+        verify_otp_code(db, user_id, body.code, purpose=OTP_PASSWORD_RESET_PURPOSE)
     except OtpError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
 
@@ -326,10 +330,14 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_SESSION_EXPIRED_MESSAGE)
 
-    user.password_hash = hash_password(request.new_password)
+    user.password_hash = hash_password(body.new_password)
+    # Invalidates every token issued before the reset — the whole point of
+    # resetting a password after suspecting compromise is that a stolen
+    # token stops working too, not just that the old password stops working.
+    user.token_version += 1
     db.commit()
 
-    access_token = create_access_token(data={"sub": user.id})
+    access_token = create_user_access_token(user)
 
     return {
         "access_token": access_token,
@@ -401,5 +409,16 @@ async def delete_current_user(
 @router.post("/refresh")
 async def refresh_token(current_user: User = Depends(get_current_user)):
     """Issue a fresh access token for the authenticated user"""
-    access_token = create_access_token(data={"sub": current_user.id})
+    access_token = create_user_access_token(current_user)
     return {"access_token": access_token}
+
+@router.post("/logout")
+async def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Log out everywhere: bumps token_version so every outstanding access
+    token for this user (this device and any other) stops working
+    immediately, including ones still within their unexpired exp. There's
+    no way to invalidate a single token in isolation — JWTs aren't tracked
+    individually — so this is "log out everywhere" by construction."""
+    current_user.token_version += 1
+    db.commit()
+    return {"message": "Logged out"}

@@ -16,7 +16,7 @@ from google.auth.transport import requests as google_requests
 
 from app.config.database import get_db
 from app.services.user_service import UserService
-from app.utils.auth import create_access_token
+from app.utils.auth import create_user_access_token
 from app.utils.oauth_state import create_state, consume_state
 from app.utils.redirect_validation import validate_app_redirect_uri
 
@@ -106,7 +106,7 @@ async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
         google_id=idinfo["sub"]
     )
 
-    access_token = create_access_token(data={"sub": user.id})
+    access_token = create_user_access_token(user)
 
     # The real JWT never goes in this redirect URL — a URL is exactly where
     # a bearer token ends up in web server access logs, any reverse proxy in

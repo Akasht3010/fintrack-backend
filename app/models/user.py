@@ -16,6 +16,12 @@ class User(Base):
     google_id = Column(String, unique=True, nullable=True)
     gmail_connected = Column(Boolean, default=False)
     gmail_refresh_token = Column(String, nullable=True)
+    # Embedded in every access token minted for this user (see
+    # create_user_access_token) and checked on every request in
+    # get_current_user. Bumping this invalidates every outstanding token
+    # instantly, regardless of its unexpired exp — the only way to end a
+    # session early since /refresh otherwise re-issues forever.
+    token_version = Column(Integer, nullable=False, default=1, server_default="1")
     created_at = Column(DateTime, default=now_ist)
     updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 
