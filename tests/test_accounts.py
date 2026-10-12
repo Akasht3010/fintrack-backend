@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+
 def test_create_account(client, auth_headers):
     headers, _ = auth_headers
     res = client.post("/api/accounts", json={
