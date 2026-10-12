@@ -68,6 +68,41 @@ def encrypt_plaintext_gmail_tokens():
         db.close()
 
 
+def _migrate_budget_money_columns():
+    """FLOAT -> NUMERIC(12,2) for budgets, which a plain ALTER ... TYPE can't
+    do: Postgres refuses to retype a generated column (remaining_amount) or
+    any column one depends on (limit_amount, spent_amount). So, in one
+    transaction: drop remaining_amount, retype the two base columns, re-add
+    remaining_amount as NUMERIC — the database recomputes it for every row.
+
+    v_budgets (sql/readable_views.sql, created by hand in pgAdmin) also pins
+    these column types if it exists, so its current definition is saved,
+    the view dropped, and recreated verbatim afterwards. Any other dependent
+    object makes the transaction fail and roll back untouched."""
+    with engine.begin() as conn:
+        view_def = conn.execute(text(
+            "SELECT pg_get_viewdef('v_budgets'::regclass, true) "
+            "WHERE to_regclass('v_budgets') IS NOT NULL"
+        )).scalar()
+        if view_def is not None:
+            conn.execute(text("DROP VIEW v_budgets"))
+
+        conn.execute(text("ALTER TABLE budgets DROP COLUMN IF EXISTS remaining_amount"))
+        for column in ("limit_amount", "spent_amount"):
+            conn.execute(text(
+                f"ALTER TABLE budgets ALTER COLUMN {column} TYPE NUMERIC(12,2) "
+                f"USING {column}::numeric(12,2)"
+            ))
+        conn.execute(text(
+            "ALTER TABLE budgets ADD COLUMN remaining_amount NUMERIC(12,2) "
+            "GENERATED ALWAYS AS (limit_amount - spent_amount) STORED"
+        ))
+
+        if view_def is not None:
+            conn.execute(text(f"CREATE VIEW v_budgets AS {view_def}"))
+    print("✅ Migrated budgets money columns to NUMERIC(12,2)")
+
+
 def migrate_schema():
     """
     Base.metadata.create_all only creates missing tables — it never alters
@@ -155,7 +190,7 @@ def migrate_schema():
                 try:
                     with engine.begin() as conn:
                         conn.execute(text(
-                            "ALTER TABLE budgets ADD COLUMN remaining_amount DOUBLE PRECISION "
+                            "ALTER TABLE budgets ADD COLUMN remaining_amount NUMERIC(12,2) "
                             "GENERATED ALWAYS AS (limit_amount - spent_amount) STORED"
                         ))
                 except Exception as e:
@@ -166,35 +201,31 @@ def migrate_schema():
     # PRECISION columns need an explicit ALTER ... TYPE with a USING cast.
     # SQLite has no real column types to migrate (dynamic type affinity) and
     # is only ever the test DB, which is always built fresh — skip it.
+    #
+    # Failures raise rather than print: a column left as FLOAT silently
+    # reintroduces the rounding drift NUMERIC exists to prevent, and a
+    # warning in Cloud Run logs went unnoticed for weeks. A crash on boot
+    # keeps the previous revision serving instead.
     if engine.dialect.name == "postgresql":
-        money_columns = [
-            ("transactions", "amount"),
-            ("accounts", "opening_balance"),
-            ("budgets", "limit_amount"),
-            ("budgets", "spent_amount"),
-            ("budgets", "remaining_amount"),
-        ]
-        for table, column in money_columns:
-            if table not in inspector.get_table_names():
-                continue
+        def _is_float(table: str, column: str) -> bool:
             col_info = next((c for c in inspector.get_columns(table) if c["name"] == column), None)
             if col_info is None:
-                continue
+                return False
             current_type = str(col_info["type"]).upper()
-            if "FLOAT" not in current_type and "DOUBLE" not in current_type:
-                continue  # already NUMERIC — migrated on a previous boot
-            try:
+            return "FLOAT" in current_type or "DOUBLE" in current_type
+
+        for table, column in [("transactions", "amount"), ("accounts", "opening_balance")]:
+            if table in inspector.get_table_names() and _is_float(table, column):
                 with engine.begin() as conn:
-                    # remaining_amount is a generated column — its expression
-                    # (limit_amount - spent_amount) is untouched, only the
-                    # declared/stored type changes, so the same ALTER form
-                    # applies to it too.
                     conn.execute(text(
                         f"ALTER TABLE {table} ALTER COLUMN {column} TYPE NUMERIC(12,2) "
                         f"USING {column}::numeric(12,2)"
                     ))
-            except Exception as e:
-                print(f"⚠️  Could not migrate {table}.{column} to NUMERIC(12,2): {e}")
+
+        if "budgets" in inspector.get_table_names() and any(
+            _is_float("budgets", c) for c in ("limit_amount", "spent_amount", "remaining_amount")
+        ):
+            _migrate_budget_money_columns()
 
     existing_index_names = {idx["name"] for idx in inspector.get_indexes("transactions")}
     if "uq_transactions_user_raw_text" not in existing_index_names:
