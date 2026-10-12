@@ -1,14 +1,14 @@
-import time
-
+from app.config.database import SessionLocal
+from app.models.oauth_state import OAuthState
 from app.utils import oauth_state
 
 
-def test_create_and_consume_round_trips_the_bound_data():
+def test_create_and_consume_round_trips_the_bound_data(client):
     nonce = oauth_state.create_state({"user_id": 42, "app_redirect_uri": "fintrack://auth-callback"})
     assert oauth_state.consume_state(nonce) == {"user_id": 42, "app_redirect_uri": "fintrack://auth-callback"}
 
 
-def test_consuming_twice_fails_the_second_time():
+def test_consuming_twice_fails_the_second_time(client):
     """Single-use — a replayed callback (or an attacker who intercepted the
     first one) must not be able to reuse the same state."""
     nonce = oauth_state.create_state({"app_redirect_uri": "fintrack://auth-callback"})
@@ -16,15 +16,17 @@ def test_consuming_twice_fails_the_second_time():
     assert oauth_state.consume_state(nonce) is None
 
 
-def test_unknown_nonce_returns_none():
+def test_unknown_nonce_returns_none(client):
     assert oauth_state.consume_state("not-a-real-nonce") is None
 
 
-def test_expired_nonce_is_rejected():
+def test_expired_nonce_is_rejected(client):
     nonce = oauth_state.create_state({"app_redirect_uri": "fintrack://auth-callback"})
     # Simulate time passing past the TTL without waiting for it in real time.
-    data, _ = oauth_state._pending_states[nonce]
-    oauth_state._pending_states[nonce] = (data, time.time() - 1)
+    db = SessionLocal()
+    db.query(OAuthState).update({OAuthState.expires_at: 0})
+    db.commit()
+    db.close()
     assert oauth_state.consume_state(nonce) is None
 
 
@@ -96,3 +98,13 @@ def test_gmail_link_token_then_authorize_round_trips_the_users_id(client, auth_h
         follow_redirects=False
     )
     assert replay_res.status_code == 401
+
+
+def test_state_is_stored_hashed_and_encrypted(client):
+    """A DB read alone mustn't yield a usable nonce or the bound access token."""
+    nonce = oauth_state.create_state({"access_token": "fake-jwt-for-test"})
+    db = SessionLocal()
+    row = db.query(OAuthState).one()
+    db.close()
+    assert row.nonce_hash != nonce
+    assert "fake-jwt-for-test" not in row.payload

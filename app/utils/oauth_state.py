@@ -1,11 +1,23 @@
+import hashlib
+import json
 import secrets
 import time
+
+from app.config.database import SessionLocal
+from app.models.oauth_state import OAuthState
+from app.utils.crypto import decrypt, encrypt
 
 # 10 minutes is generous for a user to complete Google's consent screen but
 # short enough that a leaked/logged nonce isn't useful for long.
 _STATE_TTL_SECONDS = 600
 
-_pending_states: dict[str, tuple[dict, float]] = {}
+# Stored in the DB, not a module-level dict: Cloud Run runs up to several
+# instances and scales to zero, so the instance that handles /callback (or
+# /exchange) is often not the one that minted the nonce in /authorize.
+
+
+def _hash(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode()).hexdigest()
 
 
 def create_state(data: dict) -> str:
@@ -17,26 +29,41 @@ def create_state(data: dict) -> str:
     which is forgeable and lets a crafted callback leak a token to an
     attacker-controlled redirect or attach an OAuth grant to an arbitrary
     account."""
-    _prune_expired()
     nonce = secrets.token_urlsafe(32)
-    _pending_states[nonce] = (data, time.time() + _STATE_TTL_SECONDS)
+    db = SessionLocal()
+    try:
+        _prune_expired(db)
+        db.add(OAuthState(
+            nonce_hash=_hash(nonce),
+            payload=encrypt(json.dumps(data)),
+            expires_at=time.time() + _STATE_TTL_SECONDS,
+        ))
+        db.commit()
+    finally:
+        db.close()
     return nonce
 
 
 def consume_state(nonce: str) -> dict | None:
     """Single-use: returns the bound data and forgets it, or None if the
     nonce is unknown, expired, or already used (replay)."""
-    entry = _pending_states.pop(nonce, None)
-    if entry is None:
-        return None
-    data, expires_at = entry
-    if time.time() > expires_at:
-        return None
-    return data
+    db = SessionLocal()
+    try:
+        row = db.get(OAuthState, _hash(nonce))
+        if row is None:
+            return None
+        payload, expires_at = row.payload, row.expires_at
+        # The delete's rowcount, not the read above, decides who wins: two
+        # instances racing on the same nonce can both read the row, but only
+        # one delete removes it.
+        deleted = db.query(OAuthState).filter(OAuthState.nonce_hash == row.nonce_hash).delete()
+        db.commit()
+        if deleted != 1 or time.time() > expires_at:
+            return None
+        return json.loads(decrypt(payload))
+    finally:
+        db.close()
 
 
-def _prune_expired() -> None:
-    now = time.time()
-    expired = [nonce for nonce, (_, expires_at) in _pending_states.items() if now > expires_at]
-    for nonce in expired:
-        _pending_states.pop(nonce, None)
+def _prune_expired(db) -> None:
+    db.query(OAuthState).filter(OAuthState.expires_at < time.time()).delete()
