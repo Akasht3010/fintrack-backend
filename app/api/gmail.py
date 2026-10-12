@@ -142,9 +142,13 @@ async def sync_gmail_emails(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Your Gmail connection expired. Please reconnect Gmail from Profile."
             )
+        # Not str(e) in the response — same reasoning as the /callback
+        # redirect above: Google client errors can carry response bodies and
+        # request internals. The full exception goes to the logs instead.
+        logger.exception("Gmail sync failed for user_id=%s", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Couldn't reach Gmail: {str(e)}"
+            detail="Couldn't reach Gmail right now. Please try again."
         )
 
     imported = 0
