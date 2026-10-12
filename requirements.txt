@@ -1,7 +1,10 @@
 fastapi>=0.112.0
 uvicorn>=0.30.0
 python-dotenv==1.0.0
-sqlalchemy>=2.0.27
+# <2.1: SQLAlchemy 2.1 made psycopg (v3) the default driver for postgresql://
+# URLs, but only psycopg2-binary is installed — an unpinned rebuild crashed
+# at startup with "No module named psycopg".
+sqlalchemy>=2.0.27,<2.1
 psycopg2-binary>=2.9.11
 pydantic>=2.7.0
 pydantic-settings>=2.2.0
