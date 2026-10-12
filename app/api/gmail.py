@@ -1,3 +1,4 @@
+import logging
 import os
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,9 +20,11 @@ from app.schemas.transaction import MAX_TRANSACTION_AMOUNT
 from app.utils.auth import get_current_user
 from app.utils.crypto import decrypt
 from app.utils.oauth_state import create_state, consume_state
+from app.utils.redirect_validation import validate_app_redirect_uri
 from app.utils.timezone import now_ist, to_ist_naive
 
 router = APIRouter(prefix="/api/gmail", tags=["gmail"])
+logger = logging.getLogger(__name__)
 
 gmail_service = GmailService()
 
@@ -48,6 +51,8 @@ async def gmail_authorize(
     app_redirect_uri: str = Query(...)
 ):
     """Kick off Gmail's OAuth consent flow (readonly inbox access) for the current user."""
+    validate_app_redirect_uri(app_redirect_uri, callback_path="gmail-callback")
+
     pending = consume_state(link_token)
     if pending is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired link token")
@@ -73,9 +78,14 @@ async def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
 
     try:
         refresh_token = gmail_service.exchange_code_for_token(code, f"{PUBLIC_BASE_URL}{CALLBACK_PATH}")
-    except Exception as e:
+    except Exception:
+        # Not str(e): an OAuth/HTTP client exception can carry response
+        # bodies or internal hostnames, and this redirect URL is exactly
+        # where that would end up in access logs / browser history — same
+        # reasoning as keeping the real JWT out of this redirect entirely.
+        logger.exception("Gmail token exchange failed for user_id=%s", user_id)
         separator = "&" if "?" in app_redirect_uri else "?"
-        return RedirectResponse(f"{app_redirect_uri}{separator}gmail_connected=false&error={str(e)}")
+        return RedirectResponse(f"{app_redirect_uri}{separator}gmail_connected=false&error=connection_failed")
 
     UserService.update_gmail_token(db, user_id, refresh_token)
 

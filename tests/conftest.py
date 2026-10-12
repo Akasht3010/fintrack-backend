@@ -14,10 +14,16 @@ os.environ.setdefault("OTP_RESEND_COOLDOWN_SECONDS", "30")
 os.environ.setdefault("ENCRYPTION_KEY", "MFRxU3ZTP7X4Sn3fJUvE8-3wztT-M8gEQPmWNz8kX_Q=")  # test-only Fernet key
 os.environ.setdefault("ENV", "development")  # send_otp_email's console fallback requires this explicitly
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # tests reuse one fake client IP across many /login calls
+# Dummy but well-formed — enough for google-auth-oauthlib to build an
+# authorization_url locally (no network call) so /api/auth/google/authorize
+# is actually exercisable in tests instead of always 500ing as unconfigured.
+os.environ.setdefault("GOOGLE_CLIENT_ID", "test-google-client-id.apps.googleusercontent.com")
+os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-google-client-secret")
+
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 
 from app.config.database import Base, engine
 from app.main import app

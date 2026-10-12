@@ -18,6 +18,7 @@ from app.config.database import get_db
 from app.services.user_service import UserService
 from app.utils.auth import create_access_token
 from app.utils.oauth_state import create_state, consume_state
+from app.utils.redirect_validation import validate_app_redirect_uri
 
 router = APIRouter(prefix="/api/auth/google", tags=["google-auth"])
 
@@ -60,6 +61,7 @@ async def google_authorize(app_redirect_uri: str = Query(...)):
     a random nonce bound server-side to it and send only the nonce.
     """
     _require_configured()
+    validate_app_redirect_uri(app_redirect_uri, callback_path="auth-callback")
 
     state = create_state({"app_redirect_uri": app_redirect_uri})
     flow = _build_flow()
