@@ -80,9 +80,11 @@ def _migrate_budget_money_columns():
     the view dropped, and recreated verbatim afterwards. Any other dependent
     object makes the transaction fail and roll back untouched."""
     with engine.begin() as conn:
+        # to_regclass, not 'v_budgets'::regclass: the cast errors when the
+        # view doesn't exist (even under a false WHERE), while to_regclass
+        # yields NULL and pg_get_viewdef(NULL) returns NULL.
         view_def = conn.execute(text(
-            "SELECT pg_get_viewdef('v_budgets'::regclass, true) "
-            "WHERE to_regclass('v_budgets') IS NOT NULL"
+            "SELECT pg_get_viewdef(to_regclass('v_budgets'), true)"
         )).scalar()
         if view_def is not None:
             conn.execute(text("DROP VIEW v_budgets"))
