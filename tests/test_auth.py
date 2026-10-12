@@ -296,6 +296,22 @@ def test_logout_invalidates_every_outstanding_token_not_just_the_caller(client, 
     assert me_res.status_code == 401
 
 
+def test_pre_revocation_token_without_tv_still_works_until_logout(client, signup):
+    """Tokens minted before token_version existed have no "tv" claim — they
+    must keep working across the deploy (not log everyone out), yet still
+    die on the next logout like any other token."""
+    from app.utils.auth import create_access_token
+
+    token, user = signup(email="legacy@example.com", phone="9876543210")
+    legacy = create_access_token(data={"sub": user["id"]})
+    headers = {"Authorization": f"Bearer {legacy}"}
+
+    assert client.get("/api/auth/me", headers=headers).status_code == 200
+
+    client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+
+
 def test_refresh_after_logout_is_rejected(client, signup):
     token, _ = signup(email="quinn@example.com", phone="9876543210")
     client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})

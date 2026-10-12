@@ -70,7 +70,12 @@ def verify_token(token: str) -> Optional[dict]:
         sub = payload.get("sub")
         if sub is None:
             return None
-        return {"user_id": int(sub), "token_version": payload.get("tv")}
+        # Tokens minted before revocation shipped carry no "tv". Reading
+        # them as version 1 (every account's starting token_version) keeps
+        # those sessions alive across the deploy instead of logging every
+        # user out at once — and they're still revocable, since any logout
+        # or password reset bumps the user past 1.
+        return {"user_id": int(sub), "token_version": payload.get("tv", 1)}
     except (jwt.InvalidTokenError, ValueError):
         return None
 
