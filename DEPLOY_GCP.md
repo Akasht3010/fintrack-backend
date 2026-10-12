@@ -162,7 +162,7 @@ gcloud run deploy fintrack \
   --allow-unauthenticated \
   --add-cloudsql-instances PROJECT_ID:REGION:fintrack-db \
   --port 8080 --cpu 1 --memory 512Mi --min-instances 0 --max-instances 4 \
-  --set-env-vars ENV=production,ACCESS_TOKEN_EXPIRE_MINUTES=30,OTP_EXPIRE_MINUTES=5,OTP_RESEND_COOLDOWN_SECONDS=30,PUBLIC_BASE_URL=https://DOMAIN,CORS_ORIGINS=https://DOMAIN,SMTP_HOST=smtp.gmail.com,SMTP_PORT=587 \
+  --set-env-vars ENV=production,TRUSTED_PROXY_HOPS=1,ACCESS_TOKEN_EXPIRE_MINUTES=30,OTP_EXPIRE_MINUTES=5,OTP_RESEND_COOLDOWN_SECONDS=30,PUBLIC_BASE_URL=https://DOMAIN,CORS_ORIGINS=https://DOMAIN,SMTP_HOST=smtp.gmail.com,SMTP_PORT=587 \
   --set-secrets DATABASE_URL=fintrack-database-url:latest,SECRET_KEY=fintrack-secret-key:latest,ENCRYPTION_KEY=fintrack-encryption-key:latest,GOOGLE_CLIENT_ID=fintrack-google-client-id:latest,GOOGLE_CLIENT_SECRET=fintrack-google-client-secret:latest,SMTP_USER=fintrack-smtp-user:latest,SMTP_PASSWORD=fintrack-smtp-password:latest,SMTP_FROM=fintrack-smtp-from:latest,ADMIN_API_KEY=fintrack-admin-api-key:latest
 ```
 
