@@ -34,14 +34,15 @@ def mount_web(app: FastAPI) -> None:
 
         # Mirrors Expo's recommended nginx `try_files $uri $uri.html /index.html`.
         if path:
-            safe = os.path.normpath(path)
-            if not safe.startswith(".."):
-                for candidate in (
-                    os.path.join(WEB_DIR, safe),
-                    os.path.join(WEB_DIR, safe + ".html"),
-                    os.path.join(WEB_DIR, safe, "index.html"),
-                ):
-                    if os.path.isfile(candidate):
-                        return FileResponse(candidate)
+            # Containment is checked on the fully resolved path, not the raw
+            # string: a percent-encoded leading slash (/%2Fetc/passwd) arrives
+            # here as an absolute path, and os.path.join discards WEB_DIR
+            # entirely for those — a `..` prefix check alone let that read
+            # any file on the box (including /proc/self/environ's secrets).
+            web_root = os.path.realpath(WEB_DIR)
+            for candidate in (path, path + ".html", os.path.join(path, "index.html")):
+                resolved = os.path.realpath(os.path.join(web_root, candidate))
+                if os.path.commonpath([resolved, web_root]) == web_root and os.path.isfile(resolved):
+                    return FileResponse(resolved)
 
         return FileResponse(INDEX)
