@@ -16,12 +16,13 @@ def create_budget(
     db: Session = Depends(get_db)
 ):
     """Create a budget for a category over the current week/month. 409s if one already covers this category."""
-    if not CategoryService.name_exists(db, current_user.id, budget.category):
+    category = CategoryService.canonical_name(db, current_user.id, budget.category)
+    if category is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown category '{budget.category}'")
 
     try:
         created = BudgetService.create_budget(
-            db, current_user.id, budget.category, budget.limit_amount, budget.period
+            db, current_user.id, category, budget.limit_amount, budget.period
         )
     except DuplicateBudgetError:
         raise HTTPException(

@@ -19,9 +19,11 @@ from app.services.category_service import CategoryService
 from app.utils.auth import get_current_user
 from app.utils.timezone import now_ist, to_ist_naive
 
-def _ensure_category_exists(db: Session, user_id: int, category: str) -> None:
-    if not CategoryService.name_exists(db, user_id, category):
+def _canonical_category(db: Session, user_id: int, category: str) -> str:
+    canonical = CategoryService.canonical_name(db, user_id, category)
+    if canonical is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown category '{category}'")
+    return canonical
 
 _FORMULA_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
@@ -82,7 +84,7 @@ def create_transaction(
     db: Session = Depends(get_db)
 ):
     """Create a new transaction for the authenticated user"""
-    _ensure_category_exists(db, current_user.id, transaction.category)
+    category = _canonical_category(db, current_user.id, transaction.category)
     _ensure_account_owned(db, current_user.id, transaction.account_id)
 
     # The `date` column is naive IST (same convention as the Gmail/SMS sync
@@ -101,7 +103,7 @@ def create_transaction(
         amount=transaction.amount,
         currency="INR",
         type=transaction.type,
-        category=transaction.category,
+        category=category,
         merchant=transaction.merchant,
         description=transaction.description,
         date=transaction_date,
@@ -112,7 +114,6 @@ def create_transaction(
         # hand-entered transaction "gmail"/"aa" and impersonate a
         # higher-trust import.
         source="manual",
-        raw_text=transaction.raw_text,
         idempotency_key=transaction.idempotency_key,
         is_recurring=transaction.is_recurring
     )
@@ -120,16 +121,14 @@ def create_transaction(
     try:
         db.commit()
     except IntegrityError:
-        # Two dedup indexes can raise here: (user_id, raw_text) — the
-        # Gmail/SMS sync endpoints' marker, which a direct API call can also
-        # hit since raw_text is client-settable — and (user_id,
-        # idempotency_key), which exists specifically so a retried create
-        # (e.g. a mobile client resending after a timeout, the first attempt
-        # having actually succeeded) 409s instead of double-inserting.
+        # The (user_id, idempotency_key) index exists specifically so a
+        # retried create (e.g. a mobile client resending after a timeout,
+        # the first attempt having actually succeeded) 409s instead of
+        # double-inserting. raw_text is never set on this path any more.
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A transaction with this raw_text or idempotency_key already exists"
+            detail="A transaction with this idempotency_key already exists"
         )
     db.refresh(db_transaction)
     BudgetService.sync_for_categories(db, current_user.id, db_transaction.category)
@@ -248,7 +247,7 @@ def update_transaction(
 
     updates = update.model_dump(exclude_unset=True)
     if "category" in updates:
-        _ensure_category_exists(db, current_user.id, updates["category"])
+        updates["category"] = _canonical_category(db, current_user.id, updates["category"])
     if "account_id" in updates:
         _ensure_account_owned(db, current_user.id, updates["account_id"])
 

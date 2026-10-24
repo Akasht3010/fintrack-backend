@@ -38,6 +38,18 @@ class CategoryService:
         return db.query(query.exists()).scalar()
 
     @staticmethod
+    def canonical_name(db: Session, user_id: int, name: str) -> str | None:
+        """The stored spelling of a visible category, matched
+        case-insensitively (as name_exists does) — or None if there's no
+        such category. Transactions and budgets must store this, not the
+        caller's casing: budgets, insights and renames all match category
+        strings exactly, so "Food" would silently miss the "food" budget."""
+        return db.query(Category.name).filter(
+            or_(Category.user_id.is_(None), Category.user_id == user_id),
+            func.lower(Category.name) == name.strip().lower()
+        ).limit(1).scalar()
+
+    @staticmethod
     def name_in_use(db: Session, user_id: int, name: str) -> bool:
         in_transactions = db.query(Transaction).filter(
             Transaction.user_id == user_id, Transaction.category == name

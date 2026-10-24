@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from datetime import datetime
 from typing import Optional, Literal
 
@@ -13,22 +13,33 @@ TransactionSource = Literal["gmail", "manual", "sms", "aa"]
 # extra digit or a malicious value, not a real transaction limit.
 MAX_TRANSACTION_AMOUNT = 100_000_000
 
+# Text bounds: generous for real merchant names/notes, but no unbounded
+# strings (the DB columns are unbounded VARCHAR).
+MAX_CATEGORY_LENGTH = 60
+MAX_MERCHANT_LENGTH = 120
+MAX_DESCRIPTION_LENGTH = 500
+
 class TransactionBase(BaseModel):
     # The app is INR-only. `currency` is kept on the row (and echoed back
     # here) purely so existing data stays valid; it's always "INR".
     amount: Money = Field(gt=0, le=MAX_TRANSACTION_AMOUNT)
     currency: str = "INR"
     type: TransactionType
-    category: str
-    merchant: str
-    description: str
+    category: str = Field(min_length=1, max_length=MAX_CATEGORY_LENGTH)
+    merchant: str = Field(min_length=1, max_length=MAX_MERCHANT_LENGTH)
+    description: str = Field(max_length=MAX_DESCRIPTION_LENGTH)
     date: datetime
     source: TransactionSource
     is_recurring: bool = False
     account_id: Optional[int] = None
 
 class TransactionCreate(TransactionBase):
-    raw_text: Optional[str] = None
+    # No raw_text: that column holds the Gmail/SMS import markers
+    # ("gmail:<id>", "sms:<addr>:<ts>"), built server-side. Accepting it
+    # here let a client claim a marker in advance and permanently block the
+    # matching import via the (user_id, raw_text) unique index. An old
+    # client still sending it is fine — unknown fields are ignored.
+    #
     # Optional client-generated dedup key so a retried create (e.g. a mobile
     # client resending after a timeout) can't double-insert — enforced by a
     # DB unique index the same way raw_text is for imported transactions.
@@ -37,10 +48,23 @@ class TransactionCreate(TransactionBase):
 class TransactionUpdate(BaseModel):
     amount: Optional[Money] = Field(default=None, gt=0, le=MAX_TRANSACTION_AMOUNT)
     type: Optional[TransactionType] = None
-    category: Optional[str] = None
-    merchant: Optional[str] = None
-    description: Optional[str] = None
+    category: Optional[str] = Field(default=None, min_length=1, max_length=MAX_CATEGORY_LENGTH)
+    merchant: Optional[str] = Field(default=None, min_length=1, max_length=MAX_MERCHANT_LENGTH)
+    description: Optional[str] = Field(default=None, max_length=MAX_DESCRIPTION_LENGTH)
+    # The one field that may be explicitly cleared (unlink from an account).
     account_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def reject_null_for_required_columns(self):
+        # Optional here only means "may be omitted". An explicit null for a
+        # NOT NULL column used to reach the DB and come back as a 500.
+        nulled = [
+            name for name in ("amount", "type", "category", "merchant", "description")
+            if name in self.model_fields_set and getattr(self, name) is None
+        ]
+        if nulled:
+            raise ValueError(f"{', '.join(nulled)} cannot be null")
+        return self
 
 class TransactionResponse(TransactionBase):
     id: int
