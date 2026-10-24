@@ -69,7 +69,7 @@ run.py            # entrypoint (uvicorn)
 
 ## API overview
 
-All `/api/*` routers are mounted in `app/main.py`. Every route below except signup, login step 1, forgot-password, and the OAuth redirect endpoints requires `Authorization: Bearer <access token>`; all reads/writes are scoped to the token's user (a client-supplied `user_id` is never trusted). `/health` (GET + HEAD) is public.
+All `/api/*` routers are mounted in `app/main.py`. Every route below except signup, login step 1, forgot-password, and the OAuth redirect endpoints requires `Authorization: Bearer <access token>` — or, for web clients that send `X-Auth-Transport: cookie`, the HttpOnly `fintrack_session` cookie those clients receive instead of a token in the body (cookie-authenticated writes must also carry that header; `POST /api/auth/clear-session` drops a dead cookie). All reads/writes are scoped to the token's user (a client-supplied `user_id` is never trusted). `/health` (GET + HEAD) is public.
 
 ### Auth (`/api/auth`)
 
