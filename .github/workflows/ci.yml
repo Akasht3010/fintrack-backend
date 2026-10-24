@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [uat, main]
+  push:
+    branches: [uat, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"  # matches the Dockerfile base image
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # tests/conftest.py sets every required env var itself (in-memory SQLite,
+      # test SECRET_KEY, blanked SMTP), so no secrets or services are needed.
+      - run: python -m pytest -q
