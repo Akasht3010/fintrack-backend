@@ -73,18 +73,20 @@ All `/api/*` routers are mounted in `app/main.py`. Every route below except sign
 
 ### Auth (`/api/auth`)
 
-Login and password reset are two-step: password (or identity) check → emailed 6-digit OTP → token. Step 1 returns a short-lived `pending_token`; only step 2 issues a real access token.
+Signup, login and password reset are all two-step: password (or identity) check → emailed 6-digit OTP → token. Step 1 returns a short-lived `pending_token`; only step 2 issues a real access token.
 
 | Method | Path               | Auth | Description |
 |--------|--------------------|:---:|--------------|
-| POST   | `/signup`          | – | Create an account: `name`, a real unique `email`, a 10-digit `phone`, `password` + `confirm_password` (8–72 chars). Returns an access token immediately (no OTP on signup). 409s if the email or phone is taken. |
+| POST   | `/signup`          | – | Create an account: `name`, a unique `email`, a 10-digit `phone`, `password` + `confirm_password` (8–72 chars). Emails an OTP and returns `{ pending_token, email_hint }` — finish with `/verify-otp`, which issues the token and marks the email verified. 409s if the email or phone is taken. |
 | POST   | `/login`           | – | Step 1: `{ identifier (phone or email), password }`. Verifies the password, emails an OTP, returns `{ pending_token, email_hint }`. 404 unknown identifier, 401 wrong password, 400 if the account is Google-only. |
 | POST   | `/verify-otp`      | – | Step 2: `{ pending_token, code }` → `{ access_token, user }`. |
 | POST   | `/resend-otp`      | – | `{ pending_token }` — reissues the code for whichever flow (login or reset) the token was scoped to. Rate-limited by `OTP_RESEND_COOLDOWN_SECONDS`. |
 | POST   | `/forgot-password` | – | Step 1 of reset: `{ identifier }` → emails an OTP, returns `{ pending_token, email_hint }`. Works for Google-only accounts setting a password for the first time. |
 | POST   | `/reset-password`  | – | Step 2: `{ pending_token, code, new_password, confirm_new_password }` → sets the password and logs the user in (`{ access_token, user }`). |
 | GET    | `/me`              | ✅ | The authenticated user. |
-| PATCH  | `/me`              | ✅ | Update `name` / `email` / `phone`. Email and phone stay unique (409 otherwise). |
+| PATCH  | `/me`              | ✅ | Update `name` / `phone` (phone stays unique, 409 otherwise). A *different* `email` is refused with 400 — use `/me/email`. |
+| POST   | `/me/email`        | ✅ | Step 1 of an email change: `{ new_email }` → emails a code to the **new** address, returns `{ pending_token, email_hint }`. 409 if taken. |
+| POST   | `/me/email/verify` | ✅ | Step 2: `{ pending_token, code }` → switches the email, ends every other session, returns `{ access_token, user }`. |
 | DELETE | `/me`              | ✅ | Permanently delete the account and all its data (transactions, budgets, accounts, categories, OTPs). Best-effort revokes any Gmail grant first. Irreversible. |
 | POST   | `/refresh`         | ✅ | Issue a fresh access token for the authenticated user. |
 
@@ -110,7 +112,10 @@ See **Google OAuth setup** below — this needs real credentials and, for local 
 `source` is one of `manual`, `gmail`, `sms`, `aa` (account aggregator). Imported rows carry a per-source dedup marker in `raw_text` (`gmail:<id>`, `sms:<address>:<epoch>`), enforced by a partial unique index on `(user_id, raw_text)`.
 
 ### Budgets (`/api/budgets`)
-Per-category limits for the current week or month. `spent_amount` is a
+Per-category limits for the current week or month. Budgets recur: when a
+period ends, the next `GET /api/budgets` starts the new week/month with
+the same limit (ended rows are kept as history). Deleting a budget removes
+its whole series, which is how it stops recurring. `spent_amount` is a
 materialized column: it's re-derived from the user's transactions (debits in
 that category, within the budget window) and written back
 whenever those transactions change — on transaction create / edit / delete
@@ -124,7 +129,7 @@ in step with no app involvement.
 | POST   | `/`         | `{ category, limit_amount, period: weekly\|monthly }`. Seeds `spent_amount` from spend already in the period. 409 if a same-category, same-period budget is already active. |
 | GET    | `/`         | Budgets active right now (`start_date <= now <= end_date`), each with current spend. |
 | PATCH  | `/{id}`     | Change `limit_amount`. |
-| DELETE | `/{id}`     | Delete a budget. |
+| DELETE | `/{id}`     | Delete a budget and its past periods, so it stops recurring. |
 
 ### Categories (`/api/categories`)
 Built-in defaults (`user_id IS NULL`, shared) plus the caller's own custom ones. Each has a `type` of `expense`, `income`, or `both` (transfer/other).
