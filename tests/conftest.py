@@ -13,6 +13,13 @@ os.environ.setdefault("OTP_EXPIRE_MINUTES", "5")
 os.environ.setdefault("OTP_RESEND_COOLDOWN_SECONDS", "30")
 os.environ.setdefault("ENCRYPTION_KEY", "MFRxU3ZTP7X4Sn3fJUvE8-3wztT-M8gEQPmWNz8kX_Q=")  # test-only Fernet key
 os.environ.setdefault("ENV", "development")  # send_otp_email's console fallback requires this explicitly
+# app.config.database calls load_dotenv(), which would otherwise pull the
+# developer's real SMTP credentials from .env into the test process — and
+# every OTP a test triggers without patching send_otp_email would really be
+# sent. load_dotenv never overrides a variable that's already set, so
+# blanking these here keeps send_otp_email on its console fallback.
+for _smtp_var in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"):
+    os.environ[_smtp_var] = ""
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")  # tests reuse one fake client IP across many /login calls
 # Dummy but well-formed — enough for google-auth-oauthlib to build an
 # authorization_url locally (no network call) so /api/auth/google/authorize
@@ -27,6 +34,14 @@ from fastapi.testclient import TestClient
 
 from app.config.database import Base, engine
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def _no_real_smtp():
+    """Belt and braces for the env blanking above: any attempt to open a
+    real SMTP connection from a test fails loudly instead of sending mail."""
+    with patch("app.services.email_service.smtplib.SMTP", side_effect=AssertionError("tests must not open real SMTP connections")):
+        yield
 
 
 @pytest.fixture()
@@ -79,6 +94,7 @@ def captured_otp():
 
         def _capture(to_email, name, code):
             codes["code"] = code
+            codes["to"] = to_email
 
         mock_send.side_effect = _capture
         yield codes
