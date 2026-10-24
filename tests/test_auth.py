@@ -1,3 +1,11 @@
+from unittest.mock import MagicMock, patch
+
+from app.config.database import SessionLocal
+from app.models.user import User
+from app.services.user_service import UserService
+from app.utils.oauth_state import create_state
+
+
 def test_users_phone_has_a_db_level_unique_constraint(client):
     """UserService.create_user's pre-insert uniqueness check has a race: two
     concurrent signups with the same phone can both pass it before either
@@ -23,16 +31,78 @@ def test_users_phone_has_a_db_level_unique_constraint(client):
         db.close()
 
 
-def test_signup_returns_access_token_and_user(client):
+def test_signup_emails_an_otp_and_does_not_return_an_access_token(client, captured_otp):
     res = client.post("/api/auth/signup", json={
         "name": "Alice", "email": "alice@example.com", "phone": "9876543210",
         "password": "TestPass123!", "confirm_password": "TestPass123!"
     })
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["access_token"]
-    assert body["user"]["email"] == "alice@example.com"
-    assert body["user"]["phone"] == "9876543210"
+    assert "access_token" not in body
+    assert body["pending_token"]
+    assert body["email_hint"] == "al***@example.com"
+    assert captured_otp["code"] and len(captured_otp["code"]) == 6
+
+
+def test_signup_otp_round_trip_verifies_the_email_and_issues_a_session(client, captured_otp):
+    res = client.post("/api/auth/signup", json={
+        "name": "Alice", "email": "alice@example.com", "phone": "9876543210",
+        "password": "TestPass123!", "confirm_password": "TestPass123!"
+    })
+    verify_res = client.post("/api/auth/verify-otp", json={
+        "pending_token": res.json()["pending_token"], "code": captured_otp["code"]
+    })
+    assert verify_res.status_code == 200, verify_res.text
+    assert verify_res.json()["user"]["phone"] == "9876543210"
+
+    db = SessionLocal()
+    try:
+        assert db.query(User).filter(User.email == "alice@example.com").one().email_verified is True
+    finally:
+        db.close()
+
+
+def test_google_sign_in_into_an_unverified_signup_drops_its_password_and_sessions(client, captured_otp):
+    """Pre-account-takeover: someone signs up with an address they don't own
+    and never verifies it. When the address's real owner later signs in
+    with Google, they must not inherit a password (or a session) that the
+    squatter set."""
+    client.post("/api/auth/signup", json={
+        "name": "Squatter", "email": "victim@example.com", "phone": "9876543210",
+        "password": "SquatterPass1!", "confirm_password": "SquatterPass1!"
+    })
+
+    db = SessionLocal()
+    try:
+        before = db.query(User).filter(User.email == "victim@example.com").one()
+        version_before = before.token_version
+        user = UserService.find_or_create_google_user(
+            db, email="victim@example.com", name="Victim", avatar=None, google_id="google-sub-1"
+        )
+        assert user.password_hash is None
+        assert user.token_version == version_before + 1
+        assert user.email_verified is True
+    finally:
+        db.close()
+
+    login_res = client.post("/api/auth/login", json={"identifier": "victim@example.com", "password": "SquatterPass1!"})
+    assert login_res.status_code == 400  # Google-only now; the squatter's password is gone
+
+
+def test_google_sign_in_into_a_verified_account_keeps_its_password(client, signup):
+    token, _ = signup(email="owner@example.com", phone="9876543210", password="OwnerPass123!")
+
+    db = SessionLocal()
+    try:
+        user = UserService.find_or_create_google_user(
+            db, email="owner@example.com", name="Owner", avatar=None, google_id="google-sub-2"
+        )
+        assert user.password_hash is not None
+    finally:
+        db.close()
+
+    # Existing session untouched — nothing about this account was in doubt.
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 200
 
 
 def test_signup_rejects_mismatched_passwords(client):
@@ -341,3 +411,20 @@ def test_password_reset_invalidates_tokens_issued_before_it(client, signup, capt
     new_token = reset_res.json()["access_token"]
     new_token_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {new_token}"})
     assert new_token_res.status_code == 200
+
+
+def test_google_callback_refuses_an_unverified_google_email(client, signup):
+    signup(email="owner@example.com", phone="9876543210")
+    state = create_state({"app_redirect_uri": "fintrack://auth-callback"})
+    idinfo = {"email": "owner@example.com", "email_verified": False, "sub": "google-sub-3", "name": "X"}
+
+    with patch("app.api.google_auth._build_flow", return_value=MagicMock()), \
+         patch("app.api.google_auth.google_id_token.verify_oauth2_token", return_value=idinfo):
+        res = client.get("/api/auth/google/callback", params={"code": "c", "state": state}, follow_redirects=False)
+
+    assert res.status_code == 400
+    db = SessionLocal()
+    try:
+        assert db.query(User).filter(User.email == "owner@example.com").one().google_id is None
+    finally:
+        db.close()

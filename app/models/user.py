@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Index, text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Index, false, text
 from app.config.database import Base
 from app.utils.timezone import now_ist
 
@@ -22,6 +22,12 @@ class User(Base):
     # instantly, regardless of its unexpired exp — the only way to end a
     # session early since /refresh otherwise re-issues forever.
     token_version = Column(Integer, nullable=False, default=1, server_default="1")
+    # True once the owner of `email` has proven it: a consumed login/reset
+    # OTP, or a Google sign-in. Signup alone doesn't set it — an unverified
+    # row may have been created by someone who merely typed the address, so
+    # find_or_create_google_user won't hand that row's password or sessions
+    # to the real owner when they later sign in with Google.
+    email_verified = Column(Boolean, nullable=False, default=False, server_default=false())
     created_at = Column(DateTime, default=now_ist)
     updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)
 

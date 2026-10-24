@@ -77,6 +77,15 @@ class UserService:
 
         if user:
             changed = False
+            if not user.email_verified:
+                # Nobody has proven they own this address until now, so the
+                # password and any sessions on this row may belong to whoever
+                # typed it in at signup — not to the person Google just
+                # verified. Drop both before handing the account over.
+                user.password_hash = None
+                user.token_version += 1
+                user.email_verified = True
+                changed = True
             if not user.google_id:
                 user.google_id = google_id
                 changed = True
@@ -94,7 +103,8 @@ class UserService:
             phone=None,
             avatar=avatar,
             google_id=google_id,
-            gmail_connected=False
+            gmail_connected=False,
+            email_verified=True
         )
         db.add(db_user)
         db.commit()

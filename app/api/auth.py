@@ -84,10 +84,6 @@ class SignupRequest(BaseModel):
             raise ValueError("Passwords do not match")
         return self
 
-class SignupResponse(BaseModel):
-    access_token: str
-    user: UserResponse
-
 class LoginRequest(BaseModel):
     identifier: str  # phone number or email address
     password: str
@@ -143,10 +139,16 @@ class UpdateProfileRequest(BaseModel):
             raise ValueError("Phone number must be 10 digits")
         return digits
 
-@router.post("/signup", response_model=SignupResponse)
+@router.post("/signup", response_model=LoginPendingResponse)
 @limiter.limit("10/minute")
-async def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db)):
-    """Create a new user account. Fails if the email or phone is already registered."""
+async def signup(request: Request, body: SignupRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Create a new user account and email a verification code. Fails if the
+    email or phone is already registered.
+
+    No access token until /verify-otp succeeds: issuing one here let anyone
+    hold a live session on an account for an email they don't own — and
+    Google sign-in links by email, so the address's real owner could later
+    land in that account with the squatter still logged in."""
     user_create = UserCreate(
         name=body.name,
         email=body.email,
@@ -164,11 +166,16 @@ async def signup(request: Request, body: SignupRequest, db: Session = Depends(ge
         )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
-    access_token = create_user_access_token(user)
+    # Same purpose as login, so the existing /verify-otp and /resend-otp
+    # flow (and the app's verify-otp screen) finish signup unchanged.
+    try:
+        issue_otp(db, user, purpose=OTP_LOGIN_PURPOSE, background_tasks=background_tasks)
+    except OtpError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
 
     return {
-        "access_token": access_token,
-        "user": user
+        "pending_token": create_pending_token(user.id, purpose=OTP_LOGIN_PURPOSE),
+        "email_hint": _mask_email(user.email)
     }
 
 @router.post("/login", response_model=LoginPendingResponse)
@@ -234,6 +241,10 @@ async def verify_otp_endpoint(request: Request, body: VerifyOtpRequest, db: Sess
         verify_otp_code(db, user_id, body.code, purpose=OTP_LOGIN_PURPOSE)
     except OtpError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
+
+    if not user.email_verified:
+        user.email_verified = True
+        db.commit()
 
     access_token = create_user_access_token(user)
 
@@ -335,6 +346,8 @@ async def reset_password(request: Request, body: ResetPasswordRequest, db: Sessi
     # resetting a password after suspecting compromise is that a stolen
     # token stops working too, not just that the old password stops working.
     user.token_version += 1
+    # The emailed code proved ownership of the address, same as /verify-otp.
+    user.email_verified = True
     db.commit()
 
     access_token = create_user_access_token(user)

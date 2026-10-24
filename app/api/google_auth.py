@@ -98,6 +98,11 @@ async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
         GOOGLE_CLIENT_ID
     )
 
+    # Google can return an unverified address (e.g. some Workspace setups).
+    # Linking by email is only safe when Google itself vouches for it.
+    if not idinfo.get("email_verified"):
+        raise HTTPException(status_code=400, detail="Your Google account's email address isn't verified")
+
     user = UserService.find_or_create_google_user(
         db,
         email=idinfo["email"],

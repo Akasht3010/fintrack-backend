@@ -154,6 +154,30 @@ def migrate_schema():
                     "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1"
                 ))
 
+        if "email_verified" not in user_columns:
+            # One-time backfill. A consumed OTP or a Google identity proves
+            # the email; signup-only accounts stay unverified. A Google-linked
+            # account with a password but no consumed OTP is exactly what a
+            # pre-hijack leaves behind (someone signed up with the address,
+            # then its owner signed in with Google), so its outstanding
+            # sessions are revoked too.
+            # Very old DBs can predate google_id/password_hash (create_all
+            # never adds columns), so only reference the ones that exist.
+            proved_by_otp = "id IN (SELECT user_id FROM otp_codes WHERE consumed = TRUE)"
+            has_google = "google_id" in user_columns
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+                if has_google:
+                    conn.execute(text(
+                        f"UPDATE users SET token_version = token_version + 1 "
+                        f"WHERE google_id IS NOT NULL AND password_hash IS NOT NULL "
+                        f"AND NOT ({proved_by_otp})"
+                    ))
+                verified = f"google_id IS NOT NULL OR {proved_by_otp}" if has_google else proved_by_otp
+                conn.execute(text(f"UPDATE users SET email_verified = TRUE WHERE {verified}"))
+
         existing_user_index_names = {idx["name"] for idx in inspector.get_indexes("users")}
         if "uq_users_phone" not in existing_user_index_names:
             try:

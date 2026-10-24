@@ -41,14 +41,24 @@ def client():
 
 @pytest.fixture()
 def signup(client):
-    """Create a user via the real signup endpoint and return (access_token, user_json)."""
+    """Create a user via the real signup endpoint, complete its emailed-OTP
+    verification, and return (access_token, user_json)."""
     def _signup(email="test@example.com", phone="9999999999", password="TestPass123!", name="Test User"):
-        res = client.post("/api/auth/signup", json={
-            "name": name, "email": email, "phone": phone,
-            "password": password, "confirm_password": password
-        })
+        codes = {}
+        # Scoped to this call only, so a test's own captured_otp fixture (if
+        # any) sees just the codes its own requests trigger.
+        with patch("app.services.otp_service.send_otp_email") as mock_send:
+            mock_send.side_effect = lambda to_email, name, code: codes.update(code=code)
+            res = client.post("/api/auth/signup", json={
+                "name": name, "email": email, "phone": phone,
+                "password": password, "confirm_password": password
+            })
         assert res.status_code == 200, res.text
-        body = res.json()
+        verify_res = client.post("/api/auth/verify-otp", json={
+            "pending_token": res.json()["pending_token"], "code": codes["code"]
+        })
+        assert verify_res.status_code == 200, verify_res.text
+        body = verify_res.json()
         return body["access_token"], body["user"]
     return _signup
 
