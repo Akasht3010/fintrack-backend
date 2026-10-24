@@ -107,3 +107,29 @@ def test_amount_travels_on_the_wire_as_a_json_string_not_a_lossy_number(client, 
     raw = json.loads(res.text)
     assert isinstance(raw["amount"], str)
     assert Decimal(raw["amount"]) == Decimal("19.99")
+
+
+def test_amount_with_more_than_two_decimals_is_rejected_not_rounded(client, auth_headers):
+    """0.001 used to pass `gt=0` and land in NUMERIC(12,2) as 0.00 — a
+    zero-value transaction the schema was supposed to make impossible."""
+    headers, _ = auth_headers
+    for amount in (0.001, "0.001", 19.999):
+        res = client.post("/api/transactions", json={
+            "amount": amount, "currency": "INR", "type": "debit", "category": "food",
+            "merchant": "Cafe", "description": "lunch", "date": "2026-08-01T12:00:00",
+            "source": "manual"
+        }, headers=headers)
+        assert res.status_code == 422, (amount, res.text)
+
+
+def test_two_decimal_json_float_amount_is_still_accepted(client, auth_headers):
+    """The frontend sends amounts as JSON numbers — 0.1/19.99 must not trip
+    decimal_places through a binary-float expansion."""
+    headers, _ = auth_headers
+    for amount in (0.1, 19.99, 1234567.89):
+        res = client.post("/api/transactions", json={
+            "amount": amount, "currency": "INR", "type": "debit", "category": "food",
+            "merchant": "Cafe", "description": "lunch", "date": "2026-08-01T12:00:00",
+            "source": "manual"
+        }, headers=headers)
+        assert res.status_code == 200, (amount, res.text)
