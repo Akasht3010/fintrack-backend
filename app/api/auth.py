@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
@@ -17,6 +18,7 @@ from app.utils.auth import (
     get_current_user,
     session_response,
     clear_session_cookie,
+    MAX_SESSION_SECONDS,
 )
 from app.utils.rate_limit import limiter
 from app.models.user import User
@@ -516,8 +518,15 @@ def delete_current_user(
 @router.post("/refresh", response_model=RefreshResponse)
 def refresh_token(request: Request, response: Response, current_user: User = Depends(get_current_user)):
     """Issue a fresh access token for the authenticated user (as a renewed
-    cookie for cookie-session clients)."""
-    return session_response(request, response, create_user_access_token(current_user))
+    cookie for cookie-session clients) — until MAX_SESSION_SECONDS after
+    they last really logged in; then they must log in again."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    # Tokens from before auth_time existed start their lifetime now, rather
+    # than every existing session ending at deploy.
+    auth_time = request.state.token_auth_time or now
+    if now - auth_time > MAX_SESSION_SECONDS:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired. Please log in again.")
+    return session_response(request, response, create_user_access_token(current_user, auth_time=auth_time))
 
 @router.post("/logout")
 def logout(response: Response, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

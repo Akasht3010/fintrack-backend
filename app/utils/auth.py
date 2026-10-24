@@ -19,6 +19,11 @@ if not SECRET_KEY:
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 PENDING_TOKEN_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "5"))
+# Absolute session lifetime: /refresh re-issues 30-minute tokens, but never
+# past this long after the user last actually authenticated (password+OTP,
+# password reset, Google, email change). Without it a token — stolen or
+# not — could be refreshed forever.
+MAX_SESSION_SECONDS = int(os.getenv("MAX_SESSION_DAYS", "30")) * 24 * 3600
 
 # auto_error=False: a request may authenticate with the session cookie
 # instead of a bearer header (see get_current_user).
@@ -93,14 +98,20 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 
-def create_user_access_token(user: User) -> str:
+def create_user_access_token(user: User, auth_time: Optional[int] = None) -> str:
     """The one place that mints a real (non-pending) access token for a
     logged-in user — always embeds the user's current token_version so every
     caller participates in revocation (get_current_user rejects a token
     whose "tv" doesn't match the user's current value). Call sites must use
     this instead of create_access_token directly, or a newly-issued token
-    would bypass revocation entirely."""
-    return create_access_token(data={"sub": user.id, "tv": user.token_version})
+    would bypass revocation entirely.
+
+    `auth_time` (epoch seconds) is when the user last really authenticated —
+    now, by default; /refresh passes the original through so the absolute
+    lifetime (MAX_SESSION_SECONDS) can't be extended by refreshing."""
+    if auth_time is None:
+        auth_time = int(datetime.now(timezone.utc).timestamp())
+    return create_access_token(data={"sub": user.id, "tv": user.token_version, "auth_time": auth_time})
 
 
 def verify_token(token: str) -> Optional[dict]:
@@ -120,7 +131,7 @@ def verify_token(token: str) -> Optional[dict]:
         # those sessions alive across the deploy instead of logging every
         # user out at once — and they're still revocable, since any logout
         # or password reset bumps the user past 1.
-        return {"user_id": int(sub), "token_version": payload.get("tv", 1)}
+        return {"user_id": int(sub), "token_version": payload.get("tv", 1), "auth_time": payload.get("auth_time")}
     except (jwt.InvalidTokenError, ValueError):
         return None
 
@@ -190,4 +201,6 @@ def get_current_user(
         # signature-valid and unexpired, but no longer honored.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
+    # For /refresh, which needs the original auth_time.
+    request.state.token_auth_time = payload["auth_time"]
     return user

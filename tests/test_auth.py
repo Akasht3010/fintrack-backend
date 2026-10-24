@@ -523,3 +523,50 @@ def test_google_only_account_login_is_indistinguishable_from_unknown_identifier(
     assert google_only.status_code == unknown.status_code == 401
     assert google_only.json() == unknown.json()
     assert "Continue with Google" in google_only.json()["detail"]  # the hint survives, for everyone
+
+
+def _claims(token):
+    import jwt
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def test_refresh_carries_the_original_auth_time_forward(client, signup):
+    token, _ = signup(email="quinn@example.com", phone="9876543210")
+    original = _claims(token)["auth_time"]
+    refreshed = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {token}"}).json()["access_token"]
+    assert _claims(refreshed)["auth_time"] == original
+
+
+def test_refresh_is_refused_past_the_absolute_session_lifetime(client, signup, monkeypatch):
+    """/refresh used to re-issue forever, so a stolen token never died."""
+    import time
+    from app.utils.auth import MAX_SESSION_SECONDS, create_user_access_token
+
+    signup(email="rhea@example.com", phone="9876543210")
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "rhea@example.com").one()
+        stale = create_user_access_token(user, auth_time=int(time.time()) - MAX_SESSION_SECONDS - 60)
+        fresh_enough = create_user_access_token(user, auth_time=int(time.time()) - MAX_SESSION_SECONDS + 3600)
+    finally:
+        db.close()
+
+    assert client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {stale}"}).status_code == 401
+    # The still-valid token keeps working for normal requests until it expires...
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {stale}"}).status_code == 200
+    # ...and one inside the window refreshes fine.
+    assert client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {fresh_enough}"}).status_code == 200
+
+
+def test_pre_auth_time_tokens_get_a_lifetime_starting_at_their_first_refresh(client, signup):
+    from app.utils.auth import create_access_token
+    signup(email="saul@example.com", phone="9876543210")
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "saul@example.com").one()
+        legacy = create_access_token(data={"sub": user.id, "tv": user.token_version})  # no auth_time
+    finally:
+        db.close()
+    res = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {legacy}"})
+    assert res.status_code == 200
+    assert "auth_time" in _claims(res.json()["access_token"])
