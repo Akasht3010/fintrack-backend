@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/sms", tags=["sms"])
 
 
 @router.post("/sync", response_model=SmsSyncResponse)
-async def sync_sms_messages(
+def sync_sms_messages(
     payload: SmsSyncRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

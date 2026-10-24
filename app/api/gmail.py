@@ -34,7 +34,7 @@ CALLBACK_PATH = "/api/gmail/callback"
 
 
 @router.get("/link-token")
-async def gmail_link_token(current_user: User = Depends(get_current_user)):
+def gmail_link_token(current_user: User = Depends(get_current_user)):
     """Mints a short-lived, single-use nonce identifying the caller, for
     /authorize to consume. /authorize is opened as a top-level browser
     navigation (WebBrowser.openAuthSessionAsync / window.location.href), which
@@ -47,7 +47,7 @@ async def gmail_link_token(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/authorize")
-async def gmail_authorize(
+def gmail_authorize(
     link_token: str = Query(..., description="One-time nonce from GET /api/gmail/link-token"),
     app_redirect_uri: str = Query(...)
 ):
@@ -69,7 +69,7 @@ async def gmail_authorize(
 
 
 @router.get("/callback")
-async def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
+def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
     """Google redirects here after Gmail consent. Exchange the code, save the refresh token, bounce back to the app."""
     pending = consume_state(state)
     if pending is None:
@@ -95,7 +95,7 @@ async def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
 
 
 @router.post("/disconnect", response_model=GmailDisconnectResponse)
-async def gmail_disconnect(
+def gmail_disconnect(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -118,7 +118,7 @@ async def gmail_disconnect(
     return {"gmail_connected": False}
 
 @router.post("/sync", response_model=GmailSyncResponse)
-async def sync_gmail_emails(
+def sync_gmail_emails(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

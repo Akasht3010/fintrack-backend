@@ -10,7 +10,7 @@ from app.utils.auth import get_current_user
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
 
 @router.post("", response_model=BudgetResponse)
-async def create_budget(
+def create_budget(
     budget: BudgetCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -31,7 +31,7 @@ async def create_budget(
     return BudgetService.to_response(created)
 
 @router.get("", response_model=list[BudgetResponse])
-async def list_budgets(
+def list_budgets(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -40,7 +40,7 @@ async def list_budgets(
     return [BudgetService.to_response(b) for b in budgets]
 
 @router.patch("/{budget_id}", response_model=BudgetResponse)
-async def update_budget(
+def update_budget(
     budget_id: int,
     update: BudgetUpdate,
     current_user: User = Depends(get_current_user),
@@ -55,7 +55,7 @@ async def update_budget(
     return BudgetService.to_response(updated)
 
 @router.delete("/{budget_id}")
-async def delete_budget(
+def delete_budget(
     budget_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

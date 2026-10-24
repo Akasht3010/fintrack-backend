@@ -10,7 +10,7 @@ from app.utils.auth import get_current_user
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
 
 @router.get("", response_model=RecurringSummary)
-async def get_recurring(
+def get_recurring(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

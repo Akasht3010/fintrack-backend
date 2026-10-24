@@ -15,7 +15,7 @@ from app.utils.timezone import now_ist
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
 @router.get("", response_model=InsightsSummary)
-async def get_insights(
+def get_insights(
     months: int = Query(6, ge=1, le=12),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

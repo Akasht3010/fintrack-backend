@@ -76,7 +76,7 @@ def _apply_filters(
     return query
 
 @router.post("", response_model=TransactionResponse)
-async def create_transaction(
+def create_transaction(
     transaction: TransactionCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -136,7 +136,7 @@ async def create_transaction(
     return db_transaction
 
 @router.get("", response_model=TransactionList)
-async def list_transactions(
+def list_transactions(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     category: Optional[str] = Query(None),
@@ -166,7 +166,7 @@ async def list_transactions(
     }
 
 @router.get("/export")
-async def export_transactions(
+def export_transactions(
     category: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     date_from: Optional[datetime] = Query(None),
@@ -211,7 +211,7 @@ async def export_transactions(
     )
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
-async def get_transaction(
+def get_transaction(
     transaction_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -229,7 +229,7 @@ async def get_transaction(
     return transaction
 
 @router.patch("/{transaction_id}", response_model=TransactionResponse)
-async def update_transaction(
+def update_transaction(
     transaction_id: int,
     update: TransactionUpdate,
     current_user: User = Depends(get_current_user),
@@ -266,7 +266,7 @@ async def update_transaction(
     return transaction
 
 @router.delete("/{transaction_id}")
-async def delete_transaction(
+def delete_transaction(
     transaction_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

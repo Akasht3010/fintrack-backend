@@ -51,7 +51,7 @@ def _build_flow() -> Flow:
 
 
 @router.get("/authorize")
-async def google_authorize(app_redirect_uri: str = Query(...)):
+def google_authorize(app_redirect_uri: str = Query(...)):
     """
     Kicks off Google's OAuth consent flow. The app passes its own (dynamic,
     per-session) deep link as `app_redirect_uri`; rather than sending that
@@ -74,7 +74,7 @@ async def google_authorize(app_redirect_uri: str = Query(...)):
 
 
 @router.get("/callback")
-async def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     """
     Google redirects here after consent (this URL must be registered in
     Google Cloud Console as an authorized redirect URI). We exchange the
@@ -134,7 +134,7 @@ class ExchangeResponse(BaseModel):
 
 
 @router.post("/exchange", response_model=ExchangeResponse)
-async def google_exchange(request: ExchangeRequest):
+def google_exchange(request: ExchangeRequest):
     """Trades the one-time code from the /callback redirect for the real
     access token — see the comment in /callback for why the JWT itself
     doesn't travel in that redirect's URL. Single-use: a replayed code fails

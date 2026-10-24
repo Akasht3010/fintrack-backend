@@ -10,12 +10,12 @@ router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(re
 
 
 @router.get("/health", response_model=HealthResponse)
-async def admin_health(db: Session = Depends(get_db)):
+def admin_health(db: Session = Depends(get_db)):
     """Deeper than the public /health: includes a live DB ping and process uptime."""
     return admin_service.get_health(db)
 
 
 @router.get("/stats", response_model=StatsResponse)
-async def admin_stats(db: Session = Depends(get_db)):
+def admin_stats(db: Session = Depends(get_db)):
     """Aggregate counts for the monitoring dashboard — never per-user detail."""
     return admin_service.get_stats(db)

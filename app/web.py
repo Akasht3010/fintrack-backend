@@ -28,7 +28,7 @@ def mount_web(app: FastAPI) -> None:
             app.mount(f"/{sub}", StaticFiles(directory=d), name=sub)
 
     @app.get("/{path:path}", include_in_schema=False)
-    async def spa(path: str):
+    def spa(path: str):
         if path.startswith(_API_PREFIXES):
             return Response(status_code=404)
 

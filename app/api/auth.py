@@ -141,7 +141,7 @@ class UpdateProfileRequest(BaseModel):
 
 @router.post("/signup", response_model=LoginPendingResponse)
 @limiter.limit("10/minute")
-async def signup(request: Request, body: SignupRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def signup(request: Request, body: SignupRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Create a new user account and email a verification code. Fails if the
     email or phone is already registered.
 
@@ -180,7 +180,7 @@ async def signup(request: Request, body: SignupRequest, background_tasks: Backgr
 
 @router.post("/login", response_model=LoginPendingResponse)
 @limiter.limit("10/minute")
-async def login(request: Request, body: LoginRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def login(request: Request, body: LoginRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Step 1 of login: verify the password, then email a one-time code. Doesn't
     issue an access token yet — that only happens after /verify-otp succeeds."""
     identifier = body.identifier.strip()
@@ -227,7 +227,7 @@ async def login(request: Request, body: LoginRequest, background_tasks: Backgrou
 
 @router.post("/verify-otp", response_model=LoginResponse)
 @limiter.limit("10/minute")
-async def verify_otp_endpoint(request: Request, body: VerifyOtpRequest, db: Session = Depends(get_db)):
+def verify_otp_endpoint(request: Request, body: VerifyOtpRequest, db: Session = Depends(get_db)):
     """Step 2 of login: check the emailed code and, on success, issue the real access token."""
     user_id = verify_pending_token(body.pending_token, purpose=OTP_LOGIN_PURPOSE)
     if not user_id:
@@ -256,7 +256,7 @@ async def verify_otp_endpoint(request: Request, body: VerifyOtpRequest, db: Sess
 
 @router.post("/resend-otp")
 @limiter.limit("10/minute")
-async def resend_otp_endpoint(request: Request, body: ResendOtpRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def resend_otp_endpoint(request: Request, body: ResendOtpRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Shared by the login and password-reset flows — reissues a code for
     whichever purpose the pending token was already scoped to."""
     payload = decode_pending_token(body.pending_token)
@@ -281,7 +281,7 @@ async def resend_otp_endpoint(request: Request, body: ResendOtpRequest, backgrou
 
 @router.post("/forgot-password", response_model=LoginPendingResponse)
 @limiter.limit("10/minute")
-async def forgot_password(request: Request, body: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def forgot_password(request: Request, body: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Step 1 of password reset: email an OTP to the account's registered
     address. Deliberately doesn't require an existing password — this also
     covers a Google-only account setting a password for the first time.
@@ -320,7 +320,7 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest, backgro
 
 @router.post("/reset-password", response_model=LoginResponse)
 @limiter.limit("10/minute")
-async def reset_password(request: Request, body: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(request: Request, body: ResetPasswordRequest, db: Session = Depends(get_db)):
     """Step 2 of password reset: check the emailed code, set the new password,
     and log the user straight in (the OTP already proved email ownership)."""
     user_id = verify_pending_token(body.pending_token, purpose=OTP_PASSWORD_RESET_PURPOSE)
@@ -358,12 +358,12 @@ async def reset_password(request: Request, body: ResetPasswordRequest, db: Sessi
     }
 
 @router.get("/me", response_model=UserResponse)
-async def read_current_user(current_user: User = Depends(get_current_user)):
+def read_current_user(current_user: User = Depends(get_current_user)):
     """Get the authenticated user (identified by the bearer token)"""
     return current_user
 
 @router.patch("/me", response_model=UserResponse)
-async def update_current_user(
+def update_current_user(
     request: UpdateProfileRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -391,7 +391,7 @@ async def update_current_user(
     return current_user
 
 @router.delete("/me")
-async def delete_current_user(
+def delete_current_user(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -420,13 +420,13 @@ async def delete_current_user(
     return {"message": "Account deleted"}
 
 @router.post("/refresh")
-async def refresh_token(current_user: User = Depends(get_current_user)):
+def refresh_token(current_user: User = Depends(get_current_user)):
     """Issue a fresh access token for the authenticated user"""
     access_token = create_user_access_token(current_user)
     return {"access_token": access_token}
 
 @router.post("/logout")
-async def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Log out everywhere: bumps token_version so every outstanding access
     token for this user (this device and any other) stops working
     immediately, including ones still within their unexpired exp. There's

@@ -10,7 +10,7 @@ from app.utils.auth import get_current_user
 router = APIRouter(prefix="/api/categories", tags=["categories"])
 
 @router.get("", response_model=list[CategoryResponse])
-async def list_categories(
+def list_categories(
     type: str | None = Query(default=None, pattern="^(expense|income|both)$"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -21,7 +21,7 @@ async def list_categories(
     return CategoryService.list_visible(db, current_user.id, type)
 
 @router.post("", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
-async def create_category(
+def create_category(
     payload: CategoryCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -33,7 +33,7 @@ async def create_category(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A category with this name already exists")
 
 @router.patch("/{category_id}", response_model=CategoryResponse)
-async def update_category(
+def update_category(
     category_id: int,
     payload: CategoryUpdate,
     current_user: User = Depends(get_current_user),
@@ -50,7 +50,7 @@ async def update_category(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A category with this name already exists")
 
 @router.delete("/{category_id}")
-async def delete_category(
+def delete_category(
     category_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
