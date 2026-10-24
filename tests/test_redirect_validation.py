@@ -40,6 +40,29 @@ def test_web_origin_not_in_cors_allowlist_is_rejected(monkeypatch):
     assert exc_info.value.status_code == 400
 
 
+def test_local_http_dev_origin_is_allowed_outside_production(monkeypatch):
+    """`expo start --web` serves the app over plain http on localhost."""
+    monkeypatch.setattr("app.utils.redirect_validation._ENV", "development")
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:8081")
+    validate_app_redirect_uri("http://localhost:8081/auth-callback", callback_path="auth-callback")
+
+
+def test_local_http_dev_origin_is_rejected_in_production(monkeypatch):
+    monkeypatch.setattr("app.utils.redirect_validation._ENV", "production")
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:8081")
+    with pytest.raises(HTTPException) as exc_info:
+        validate_app_redirect_uri("http://localhost:8081/auth-callback", callback_path="auth-callback")
+    assert exc_info.value.status_code == 400
+
+
+def test_plain_http_non_loopback_origin_is_rejected_even_if_allowlisted(monkeypatch):
+    monkeypatch.setattr("app.utils.redirect_validation._ENV", "development")
+    monkeypatch.setenv("CORS_ORIGINS", "http://192.168.1.50:8081")
+    with pytest.raises(HTTPException) as exc_info:
+        validate_app_redirect_uri("http://192.168.1.50:8081/auth-callback", callback_path="auth-callback")
+    assert exc_info.value.status_code == 400
+
+
 def test_attacker_controlled_host_is_rejected():
     """The actual exploit from the 2026-10-07 review: an attacker-hosted
     collector disguised by a path that merely ends in the callback name."""

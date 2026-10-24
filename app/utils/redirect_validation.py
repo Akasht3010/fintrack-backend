@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 # just the real app. This is the allowlist that closes that gap.
 
 _ENV = os.getenv("ENV", "development")
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1"}
 
 
 def _allowed_web_origins() -> set[str]:
@@ -29,7 +30,9 @@ def validate_app_redirect_uri(uri: str, callback_path: str) -> None:
       the server would have bigger problems than this
     - one of the backend's own trusted web origins — CORS_ORIGINS already
       is that list (browser origins this backend trusts to call it
-      cross-origin), so it doubles as the web redirect allowlist
+      cross-origin), so it doubles as the web redirect allowlist. Must be
+      https, except a localhost/127.0.0.1 origin outside production (the
+      local `expo start --web` dev server is plain http)
 
     Anything else (attacker.example, javascript:, a bare IP, ...) is rejected.
     """
@@ -41,7 +44,10 @@ def validate_app_redirect_uri(uri: str, callback_path: str) -> None:
 
     parsed = urlparse(uri)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    if parsed.scheme == "https" and parsed.path == f"/{callback_path}" and origin in _allowed_web_origins():
+    secure_scheme = parsed.scheme == "https" or (
+        _ENV != "production" and parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS
+    )
+    if secure_scheme and parsed.path == f"/{callback_path}" and origin in _allowed_web_origins():
         return
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid redirect")
