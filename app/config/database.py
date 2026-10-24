@@ -29,12 +29,22 @@ print(f"📦 Using database: {_masked_database_url}")
 # Create engine
 if DATABASE_URL.startswith("postgresql"):
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-else:
+elif ":memory:" in DATABASE_URL:
+    # In-memory SQLite (the test suite): StaticPool makes every session share
+    # one connection, since each new :memory: connection is a separate,
+    # empty database.
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool
     )
+else:
+    # File-based SQLite (local dev): a normal pool, one connection per
+    # thread. Route handlers are sync and run concurrently in the
+    # threadpool, so sharing a single connection (StaticPool) let parallel
+    # requests interleave on one cursor — rows came back corrupted
+    # (IndexError inside SQLAlchemy) and requests failed with 500s/401s.
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
