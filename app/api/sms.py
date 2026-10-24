@@ -1,5 +1,4 @@
-from datetime import datetime, timedelta
-from decimal import Decimal
+from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +10,7 @@ from app.schemas.sms import SmsSyncRequest, SmsSyncResponse
 from app.schemas.transaction import MAX_TRANSACTION_AMOUNT
 from app.services.email_parser import parse_bank_email
 from app.services.categorizer import categorize_merchant
+from app.services.import_dedup import ImportDeduper
 from app.services.budget_service import BudgetService
 from app.utils.auth import get_current_user
 from app.utils.timezone import IST
@@ -33,12 +33,8 @@ def sync_sms_messages(
     imported = 0
     skipped_duplicate = 0
     skipped_unparsed = 0
-    seen_this_sync: list[tuple[Decimal, datetime]] = []
+    deduper = ImportDeduper(db, current_user.id)
     affected_categories = set()
-
-    # One purchase can produce an SMS and one or more emails minutes apart —
-    # collapse same-amount hits within this window (any source) to one row.
-    DEDUP_WINDOW = timedelta(minutes=10)
 
     for message in payload.messages:
         body = message.body or ""
@@ -65,25 +61,10 @@ def sync_sms_messages(
             skipped_unparsed += 1
             continue
 
-        window_secs = DEDUP_WINDOW.total_seconds()
-        if any(
-            amt == parsed["amount"] and abs((seen - sms_date).total_seconds()) <= window_secs
-            for amt, seen in seen_this_sync
-        ):
+        if deduper.is_duplicate(parsed["amount"], parsed["type"], sms_date):
             skipped_duplicate += 1
             continue
-
-        duplicate_nearby = db.query(Transaction).filter(
-            Transaction.user_id == current_user.id,
-            Transaction.amount == parsed["amount"],
-            Transaction.date >= sms_date - DEDUP_WINDOW,
-            Transaction.date <= sms_date + DEDUP_WINDOW,
-        ).first()
-        if duplicate_nearby:
-            skipped_duplicate += 1
-            continue
-
-        seen_this_sync.append((parsed["amount"], sms_date))
+        deduper.record(parsed["amount"], parsed["type"], sms_date)
 
         transaction = Transaction(
             user_id=current_user.id,

@@ -66,3 +66,26 @@ def test_sms_sync_rejects_oversized_fields(client, auth_headers):
     for bad in ({"body": "x" * 2001}, {"address": "A" * 65}, {"date": 10**20}, {"date": -1}):
         res = client.post("/api/sms/sync", json={"messages": [{**_msg(500, 0), **bad}]}, headers=headers)
         assert res.status_code == 422, (bad, res.text)
+
+
+def test_a_debit_and_a_same_amount_refund_minutes_apart_are_both_imported(client, auth_headers):
+    """Dedup used to compare amount only, so a purchase and its reversal
+    collapsed into one row — dropping a real credit."""
+    headers, _ = auth_headers
+    refund = {
+        "address": "VM-HDFCBK",
+        "body": "Rs.500.00 has been credited to your account ending 1234 towards Refund from FLIPKART on 05-09-26.",
+        "date": BASE_MS + 4 * 60_000,
+    }
+    res = client.post("/api/sms/sync", json={"messages": [_msg(500, 0), refund]}, headers=headers)
+    assert res.json()["imported"] == 2, res.json()
+    types = sorted(t["type"] for t in client.get("/api/transactions", headers=headers).json()["transactions"])
+    assert types == ["credit", "debit"]
+
+
+def test_same_direction_duplicate_across_syncs_still_collapses(client, auth_headers):
+    """The DB-side check (not just within one sync) also matches on type."""
+    headers, _ = auth_headers
+    client.post("/api/sms/sync", json={"messages": [_msg(500, 0, address="VM-HDFCBK")]}, headers=headers)
+    res = client.post("/api/sms/sync", json={"messages": [_msg(500, 2, address="AD-HDFCBK")]}, headers=headers)
+    assert res.json()["imported"] == 0
