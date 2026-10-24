@@ -53,3 +53,16 @@ def test_credit_card_bill_sms_is_not_imported(client, auth_headers):
     }]}, headers=headers)
     assert res.json()["imported"] == 0
     assert res.json()["skipped_unparsed"] == 1
+
+
+def test_sms_sync_rejects_more_messages_than_one_sync_can_send(client, auth_headers):
+    headers, _ = auth_headers
+    res = client.post("/api/sms/sync", json={"messages": [_msg(500, i) for i in range(501)]}, headers=headers)
+    assert res.status_code == 422
+
+
+def test_sms_sync_rejects_oversized_fields(client, auth_headers):
+    headers, _ = auth_headers
+    for bad in ({"body": "x" * 2001}, {"address": "A" * 65}, {"date": 10**20}, {"date": -1}):
+        res = client.post("/api/sms/sync", json={"messages": [{**_msg(500, 0), **bad}]}, headers=headers)
+        assert res.status_code == 422, (bad, res.text)
