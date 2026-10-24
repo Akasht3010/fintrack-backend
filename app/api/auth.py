@@ -32,6 +32,11 @@ from sqlalchemy.exc import IntegrityError
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 gmail_service = GmailService()
 
+INVALID_CREDENTIALS_MESSAGE = (
+    "Incorrect phone/email or password. If you signed up with Google, "
+    "use \"Continue with Google\" (or \"Forgot password\" to set one)."
+)
+
 OTP_LOGIN_PURPOSE = "login"
 OTP_PASSWORD_RESET_PURPOSE = "password_reset"
 
@@ -42,6 +47,11 @@ OTP_PASSWORD_RESET_PURPOSE = "password_reset"
 _NONEXISTENT_USER_SENTINEL = -1
 
 _SESSION_EXPIRED_MESSAGE = "Verification session expired. Please start over."
+
+# Compared against when there's no real hash to check (unknown identifier,
+# Google-only account), so every failed login costs one bcrypt round —
+# skipping it made "no such account" measurably faster than "wrong password".
+_DUMMY_PASSWORD_HASH = hash_password("timing-equalizer-not-a-real-password")
 
 
 def _validate_password_strength(value: str) -> str:
@@ -207,23 +217,18 @@ def login(request: Request, body: LoginRequest, background_tasks: BackgroundTask
     # is wrong — a distinguishable response here would let an attacker (or a
     # data broker) cheaply check which phone numbers/emails own a Fintrack
     # account, which is itself a PII leak for a finance app.
+    #
+    # That includes accounts with no password (Google-only): a distinct
+    # "this account signs in with Google" reply confirmed the account
+    # exists. The one message covers that case for everyone instead.
     invalid_credentials = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Incorrect phone/email or password"
+        detail=INVALID_CREDENTIALS_MESSAGE
     )
 
-    if not user:
-        raise invalid_credentials
-
-    if not user.password_hash:
-        detail = (
-            "This account signs in with Google. Use \"Continue with Google\" instead."
-            if user.google_id
-            else "This account has no password set yet — sign up again or use \"Continue with Google\" to link it."
-        )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
-
-    if not verify_password(body.password, user.password_hash):
+    password_hash = user.password_hash if user else None
+    password_ok = verify_password(body.password, password_hash or _DUMMY_PASSWORD_HASH)
+    if not user or not password_hash or not password_ok:
         raise invalid_credentials
 
     try:

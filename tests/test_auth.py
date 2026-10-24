@@ -4,6 +4,7 @@ from app.config.database import SessionLocal
 from app.models.user import User
 from app.services.user_service import UserService
 from app.utils.oauth_state import create_state
+from app.api.auth import INVALID_CREDENTIALS_MESSAGE
 
 
 def test_users_phone_has_a_db_level_unique_constraint(client):
@@ -86,7 +87,7 @@ def test_google_sign_in_into_an_unverified_signup_drops_its_password_and_session
         db.close()
 
     login_res = client.post("/api/auth/login", json={"identifier": "victim@example.com", "password": "SquatterPass1!"})
-    assert login_res.status_code == 400  # Google-only now; the squatter's password is gone
+    assert login_res.status_code == 401  # Google-only now; the squatter's password is gone
 
 
 def test_google_sign_in_into_a_verified_account_keeps_its_password(client, signup):
@@ -153,7 +154,7 @@ def test_login_rejects_unknown_identifier(client):
     # account.
     res = client.post("/api/auth/login", json={"identifier": "nobody@example.com", "password": "whatever123"})
     assert res.status_code == 401
-    assert res.json()["detail"] == "Incorrect phone/email or password"
+    assert res.json()["detail"] == INVALID_CREDENTIALS_MESSAGE
 
 
 def test_login_unknown_identifier_and_wrong_password_return_identical_responses(client, signup):
@@ -507,3 +508,18 @@ def test_google_callback_refuses_an_unverified_google_email(client, signup):
         assert db.query(User).filter(User.email == "owner@example.com").one().google_id is None
     finally:
         db.close()
+
+
+def test_google_only_account_login_is_indistinguishable_from_unknown_identifier(client):
+    """A distinct "signs in with Google" reply used to confirm the account
+    existed — the same enumeration leak the uniform 401 closes elsewhere."""
+    db = SessionLocal()
+    try:
+        UserService.find_or_create_google_user(db, email="gonly@example.com", name="G", avatar=None, google_id="g-only")
+    finally:
+        db.close()
+    google_only = client.post("/api/auth/login", json={"identifier": "gonly@example.com", "password": "whatever123"})
+    unknown = client.post("/api/auth/login", json={"identifier": "nobody@example.com", "password": "whatever123"})
+    assert google_only.status_code == unknown.status_code == 401
+    assert google_only.json() == unknown.json()
+    assert "Continue with Google" in google_only.json()["detail"]  # the hint survives, for everyone
