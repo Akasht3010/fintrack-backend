@@ -3,7 +3,7 @@ from typing import Optional
 import bcrypt
 import jwt
 import os
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.config.database import get_db
@@ -20,7 +20,52 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 PENDING_TOKEN_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "5"))
 
-security = HTTPBearer()
+# auto_error=False: a request may authenticate with the session cookie
+# instead of a bearer header (see get_current_user).
+security = HTTPBearer(auto_error=False)
+
+# --- Web session cookie -----------------------------------------------------
+# The mobile app keeps its token in the OS keychain (expo-secure-store) and
+# sends it as a bearer header. The web build has no equivalent: localStorage
+# is readable by any script on the page, so one XSS or compromised npm
+# dependency could lift the token. Web clients opt into an HttpOnly cookie
+# instead by sending `X-Auth-Transport: cookie` — script can neither read
+# the cookie nor (because cookie-mode responses omit it from the body) get
+# the token from /refresh or any login endpoint.
+SESSION_COOKIE = "fintrack_session"
+AUTH_TRANSPORT_HEADER = "x-auth-transport"
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+# Secure everywhere except local dev, where the API is plain http://.
+_COOKIE_SECURE = os.getenv("ENV", "production") != "development"
+
+
+def wants_cookie_session(request: Request) -> bool:
+    return request.headers.get(AUTH_TRANSPORT_HEADER) == "cookie"
+
+
+def session_response(request: Request, response: Response, token: str, **extra) -> dict:
+    """The body for any endpoint that issues a session. Bearer clients get
+    the token in the body; cookie clients get it only as an HttpOnly cookie
+    (access_token is null in the body)."""
+    if not wants_cookie_session(request):
+        return {"access_token": token, **extra}
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        # Strict: the web app is served from the API's own origin, so the
+        # cookie never needs to ride along on a cross-site request — which
+        # also makes cross-site request forgery a non-starter.
+        samesite="strict",
+        path="/api",
+    )
+    return {"access_token": None, **extra}
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE, path="/api", httponly=True, secure=_COOKIE_SECURE, samesite="strict")
 
 
 def hash_password(password: str) -> str:
@@ -113,11 +158,25 @@ def verify_pending_token(token: str, purpose: str) -> Optional[int]:
     return payload.get("sub")
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
-    """FastAPI dependency: resolves the bearer token to the authenticated User, or 401s."""
-    payload = verify_token(credentials.credentials)
+    """FastAPI dependency: resolves the bearer token — or, for web clients,
+    the session cookie — to the authenticated User, or 401s."""
+    if credentials is not None:
+        token = credentials.credentials
+    else:
+        token = request.cookies.get(SESSION_COOKIE)
+        # CSRF defense in depth on top of SameSite=Strict: a cookie-authed
+        # write must carry the transport header, which a cross-site form or
+        # simple request can't set (custom headers force a CORS preflight).
+        if token and request.method not in _SAFE_METHODS and not wants_cookie_session(request):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing X-Auth-Transport header")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    payload = verify_token(token)
     if payload is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 

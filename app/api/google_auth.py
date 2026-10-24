@@ -6,7 +6,9 @@ import os
 # any oauthlib token parsing happens.
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -16,7 +18,7 @@ from google.auth.transport import requests as google_requests
 
 from app.config.database import get_db
 from app.services.user_service import UserService
-from app.utils.auth import create_user_access_token
+from app.utils.auth import create_user_access_token, session_response
 from app.utils.oauth_state import create_state, consume_state
 from app.utils.redirect_validation import validate_app_redirect_uri
 
@@ -130,16 +132,16 @@ class ExchangeRequest(BaseModel):
 
 
 class ExchangeResponse(BaseModel):
-    access_token: str
+    access_token: Optional[str] = None  # null for cookie-session (web) clients
 
 
 @router.post("/exchange", response_model=ExchangeResponse)
-def google_exchange(request: ExchangeRequest):
+def google_exchange(request: Request, response: Response, body: ExchangeRequest):
     """Trades the one-time code from the /callback redirect for the real
     access token — see the comment in /callback for why the JWT itself
     doesn't travel in that redirect's URL. Single-use: a replayed code fails
     the same as an expired one."""
-    pending = consume_state(request.code)
+    pending = consume_state(body.code)
     if pending is None or "access_token" not in pending:
         raise HTTPException(status_code=401, detail="Invalid or expired code")
-    return {"access_token": pending["access_token"]}
+    return session_response(request, response, pending["access_token"])

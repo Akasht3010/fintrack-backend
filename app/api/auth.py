@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.schemas.user import UserCreate, UserResponse
@@ -15,6 +15,8 @@ from app.utils.auth import (
     verify_password,
     hash_password,
     get_current_user,
+    session_response,
+    clear_session_cookie,
 )
 from app.utils.rate_limit import limiter
 from app.models.user import User
@@ -122,8 +124,12 @@ class ResetPasswordRequest(BaseModel):
         return self
 
 class LoginResponse(BaseModel):
-    access_token: str
+    # null for cookie-session (web) clients — see session_response.
+    access_token: Optional[str] = None
     user: UserResponse
+
+class RefreshResponse(BaseModel):
+    access_token: Optional[str] = None
 
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
@@ -235,7 +241,7 @@ def login(request: Request, body: LoginRequest, background_tasks: BackgroundTask
 
 @router.post("/verify-otp", response_model=LoginResponse)
 @limiter.limit("10/minute")
-def verify_otp_endpoint(request: Request, body: VerifyOtpRequest, db: Session = Depends(get_db)):
+def verify_otp_endpoint(request: Request, response: Response, body: VerifyOtpRequest, db: Session = Depends(get_db)):
     """Step 2 of login: check the emailed code and, on success, issue the real access token."""
     user_id = verify_pending_token(body.pending_token, purpose=OTP_LOGIN_PURPOSE)
     if not user_id:
@@ -254,12 +260,7 @@ def verify_otp_endpoint(request: Request, body: VerifyOtpRequest, db: Session = 
         user.email_verified = True
         db.commit()
 
-    access_token = create_user_access_token(user)
-
-    return {
-        "access_token": access_token,
-        "user": user
-    }
+    return session_response(request, response, create_user_access_token(user), user=user)
 
 
 @router.post("/resend-otp")
@@ -328,7 +329,7 @@ def forgot_password(request: Request, body: ForgotPasswordRequest, background_ta
 
 @router.post("/reset-password", response_model=LoginResponse)
 @limiter.limit("10/minute")
-def reset_password(request: Request, body: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(request: Request, response: Response, body: ResetPasswordRequest, db: Session = Depends(get_db)):
     """Step 2 of password reset: check the emailed code, set the new password,
     and log the user straight in (the OTP already proved email ownership)."""
     user_id = verify_pending_token(body.pending_token, purpose=OTP_PASSWORD_RESET_PURPOSE)
@@ -358,12 +359,7 @@ def reset_password(request: Request, body: ResetPasswordRequest, db: Session = D
     user.email_verified = True
     db.commit()
 
-    access_token = create_user_access_token(user)
-
-    return {
-        "access_token": access_token,
-        "user": user
-    }
+    return session_response(request, response, create_user_access_token(user), user=user)
 
 @router.get("/me", response_model=UserResponse)
 def read_current_user(current_user: User = Depends(get_current_user)):
@@ -442,6 +438,7 @@ def request_email_change(
 @limiter.limit("10/minute")
 def verify_email_change(
     request: Request,
+    response: Response,
     body: EmailChangeVerifyRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -477,11 +474,12 @@ def verify_email_change(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
     db.refresh(current_user)
 
-    return {"access_token": create_user_access_token(current_user), "user": current_user}
+    return session_response(request, response, create_user_access_token(current_user), user=current_user)
 
 
 @router.delete("/me")
 def delete_current_user(
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -506,17 +504,18 @@ def delete_current_user(
     db.query(OtpCode).filter(OtpCode.user_id == current_user.id).delete()
     db.delete(current_user)
     db.commit()
+    clear_session_cookie(response)
 
     return {"message": "Account deleted"}
 
-@router.post("/refresh")
-def refresh_token(current_user: User = Depends(get_current_user)):
-    """Issue a fresh access token for the authenticated user"""
-    access_token = create_user_access_token(current_user)
-    return {"access_token": access_token}
+@router.post("/refresh", response_model=RefreshResponse)
+def refresh_token(request: Request, response: Response, current_user: User = Depends(get_current_user)):
+    """Issue a fresh access token for the authenticated user (as a renewed
+    cookie for cookie-session clients)."""
+    return session_response(request, response, create_user_access_token(current_user))
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def logout(response: Response, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Log out everywhere: bumps token_version so every outstanding access
     token for this user (this device and any other) stops working
     immediately, including ones still within their unexpired exp. There's
@@ -524,4 +523,14 @@ def logout(current_user: User = Depends(get_current_user), db: Session = Depends
     individually — so this is "log out everywhere" by construction."""
     current_user.token_version += 1
     db.commit()
+    clear_session_cookie(response)
     return {"message": "Logged out"}
+
+
+@router.post("/clear-session")
+def clear_session(response: Response):
+    """Drops the session cookie without needing a valid session — for a web
+    client whose cookie is already expired/revoked (so /logout 401s) but
+    still present in the browser. Nothing else is touched."""
+    clear_session_cookie(response)
+    return {"message": "Session cleared"}
