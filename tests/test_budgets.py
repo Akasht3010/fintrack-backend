@@ -196,3 +196,57 @@ def test_budgets_are_scoped_to_the_authenticated_user(client, auth_headers, sign
     other_headers = {"Authorization": f"Bearer {other_token}"}
     res = client.get("/api/budgets", headers=other_headers)
     assert res.json() == []
+
+
+def _add_ended_budget(user_id: int, category: str, period: str, limit: int, days_ago: int = 40):
+    from datetime import timedelta
+    from app.config.database import SessionLocal
+    from app.models.budget import Budget
+    db = SessionLocal()
+    try:
+        end = now_ist() - timedelta(days=days_ago)
+        db.add(Budget(user_id=user_id, category=category, limit_amount=limit, spent_amount=0,
+                      period=period, start_date=end - timedelta(days=6), end_date=end))
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_an_ended_budget_rolls_into_the_current_period_with_the_same_limit(client, auth_headers):
+    """Budgets used to vanish at the end of their week/month — the user had
+    to notice and recreate every one."""
+    headers, user = auth_headers
+    _add_ended_budget(user["id"], "food", "monthly", 4000, days_ago=40)
+    _add_ended_budget(user["id"], "food", "monthly", 4500, days_ago=10)  # most recent limit wins
+    client.post("/api/transactions", json={
+        "amount": 250, "currency": "INR", "type": "debit", "category": "food",
+        "merchant": "Cafe", "description": "lunch", "date": _in_period_date(), "source": "manual"
+    }, headers=headers)
+
+    listed = client.get("/api/budgets", headers=headers).json()
+    assert len(listed) == 1
+    assert Decimal(listed[0]["limit_amount"]) == Decimal("4500")
+    assert Decimal(listed[0]["spent_amount"]) == Decimal("250")  # seeded from this period's spend
+
+    # Idempotent: listing again doesn't create another row.
+    assert len(client.get("/api/budgets", headers=headers).json()) == 1
+    assert len(_budget_row(user["id"])) == 3  # two history rows + the current one
+
+
+def test_weekly_and_monthly_budgets_roll_independently(client, auth_headers):
+    headers, user = auth_headers
+    _add_ended_budget(user["id"], "food", "weekly", 800)
+    _add_ended_budget(user["id"], "food", "monthly", 4000)
+    periods = sorted(b["period"] for b in client.get("/api/budgets", headers=headers).json())
+    assert periods == ["monthly", "weekly"]
+
+
+def test_a_deleted_budget_does_not_come_back(client, auth_headers):
+    headers, user = auth_headers
+    _add_ended_budget(user["id"], "food", "monthly", 4000)  # history from earlier months
+    current = client.get("/api/budgets", headers=headers).json()[0]  # rolled forward
+    _add_ended_budget(user["id"], "food", "weekly", 800)  # a different series — must survive
+
+    assert client.delete(f"/api/budgets/{current['id']}", headers=headers).status_code == 200
+    remaining = client.get("/api/budgets", headers=headers).json()
+    assert [b["period"] for b in remaining] == ["weekly"]

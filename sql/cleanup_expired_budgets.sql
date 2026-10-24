@@ -1,3 +1,8 @@
+-- ⚠️ OBSOLETE — do not run. Budgets now recur: an ended row is what
+-- BudgetService.roll_forward uses to start the next period's budget, so
+-- deleting ended rows makes any budget that hasn't been listed since its
+-- period ended silently stop recurring. Kept only for history.
+--
 -- One-time cleanup: delete budgets whose period has already ended.
 --
 -- Why: budgets are one-shot per period (a budget covers exactly the week or

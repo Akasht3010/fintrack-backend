@@ -115,8 +115,39 @@ class BudgetService:
         BudgetService.refresh_spent(db, budgets)
 
     @staticmethod
+    def roll_forward(db: Session, user_id: int, now: datetime) -> None:
+        """Budgets recur: a row covers one week/month, and once that window
+        ends the category's budget would otherwise vanish from the app until
+        the user noticed and recreated it. For each (category, period) whose
+        most recent row has ended, start the current window with the same
+        limit. Ended rows stay as history; deleting the budget is how a user
+        stops it recurring (nothing is left to roll forward)."""
+        latest: dict[tuple[str, str], Budget] = {}
+        for budget in db.query(Budget).filter(Budget.user_id == user_id).order_by(Budget.end_date):
+            latest[(budget.category, budget.period)] = budget
+
+        created = False
+        for (category, period), budget in latest.items():
+            if budget.end_date >= now:
+                continue  # still active (or, defensively, in the future)
+            start_date, end_date = current_period_dates(period, now)
+            db.add(Budget(
+                user_id=user_id,
+                category=category,
+                limit_amount=budget.limit_amount,
+                spent_amount=compute_spent(db, user_id, category, start_date, end_date),
+                period=period,
+                start_date=start_date,
+                end_date=end_date
+            ))
+            created = True
+        if created:
+            db.commit()
+
+    @staticmethod
     def list_active_budgets(db: Session, user_id: int) -> list[Budget]:
         now = now_ist()
+        BudgetService.roll_forward(db, user_id, now)
         budgets = db.query(Budget).filter(
             Budget.user_id == user_id,
             Budget.start_date <= now,
@@ -141,7 +172,14 @@ class BudgetService:
 
     @staticmethod
     def delete_budget(db: Session, budget: Budget) -> None:
-        db.delete(budget)
+        # The whole (category, period) series, not just this row: an ended
+        # row left behind would be rolled straight back into the current
+        # period by roll_forward on the next list.
+        db.query(Budget).filter(
+            Budget.user_id == budget.user_id,
+            Budget.category == budget.category,
+            Budget.period == budget.period
+        ).delete()
         db.commit()
 
     @staticmethod
