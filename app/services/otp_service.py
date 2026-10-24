@@ -101,13 +101,25 @@ def verify_otp(db: Session, user_id: int, code: str, purpose: str) -> None:
     if now_ist() > otp.expires_at:
         raise OtpError("This code has expired. Please request a new one.")
 
-    if otp.attempts >= MAX_OTP_ATTEMPTS:
+    # Reserve an attempt *before* comparing, with one conditional UPDATE.
+    # Read-check-then-increment let a burst of concurrent guesses all see
+    # attempts < MAX and all get compared; now only MAX requests can ever
+    # win a reservation, however many arrive at once.
+    reserved = db.query(OtpCode).filter(
+        OtpCode.id == otp.id, OtpCode.attempts < MAX_OTP_ATTEMPTS
+    ).update({OtpCode.attempts: OtpCode.attempts + 1}, synchronize_session=False)
+    db.commit()
+    if not reserved:
         raise OtpError("Too many incorrect attempts. Please request a new code.")
 
     if not hmac.compare_digest(otp.code_hash, _hash_code((code or "").strip(), user_id)):
-        otp.attempts += 1
-        db.commit()
         raise OtpError("Incorrect code. Please try again.")
 
-    otp.consumed = True
+    # Same idea for redemption: only one concurrent request can flip
+    # consumed, so a correct code can't be replayed in parallel.
+    consumed = db.query(OtpCode).filter(
+        OtpCode.id == otp.id, OtpCode.consumed == False  # noqa: E712
+    ).update({OtpCode.consumed: True}, synchronize_session=False)
     db.commit()
+    if not consumed:
+        raise OtpError("No pending verification code. Please request a new one.")
