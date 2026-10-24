@@ -4,10 +4,11 @@ from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-# In-memory, per-process counters keyed by client IP — good enough for the
-# single-instance Cloud Run deploy this app runs on today (see README). It
-# won't hold a shared limit across multiple instances if this ever scales
-# out; a Redis-backed storage_uri would be the next step then.
+# In-memory, per-process counters keyed by client IP. Only correct while
+# the service runs a single instance — cloudbuild.yaml pins
+# --max-instances=1 for exactly this reason. Before scaling out, give the
+# Limiter a shared storage_uri (Redis/Memorystore); otherwise each instance
+# keeps its own buckets and the effective limits multiply.
 #
 # Disabled by default under pytest (RATE_LIMIT_ENABLED=false in
 # tests/conftest.py) so the test suite's many back-to-back /login and
