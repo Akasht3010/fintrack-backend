@@ -24,3 +24,6 @@ venv/
 # Built Expo web export, copied in at deploy time (see DEPLOY_GCP.md)
 /web/*
 !/web/.gitkeep
+
+# Local Claude Code settings (machine-specific paths)
+.claude/
