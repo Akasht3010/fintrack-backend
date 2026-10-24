@@ -17,6 +17,22 @@ OTP_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "30"))
 MAX_OTP_ATTEMPTS = 5
 
+# An email change's code goes to the *new* address, which is carried in the
+# purpose itself ("email_change:<address>") — so a code issued for one
+# address can never confirm a different one, and /resend-otp (which only
+# knows the purpose) sends to the right inbox.
+EMAIL_CHANGE_PURPOSE_PREFIX = "email_change:"
+
+
+def email_change_purpose(new_email: str) -> str:
+    return f"{EMAIL_CHANGE_PURPOSE_PREFIX}{new_email}"
+
+
+def _recipient(user: User, purpose: str) -> str:
+    if purpose.startswith(EMAIL_CHANGE_PURPOSE_PREFIX):
+        return purpose[len(EMAIL_CHANGE_PURPOSE_PREFIX):]
+    return user.email
+
 
 class OtpError(Exception):
     def __init__(self, message: str, status_code: int = 400):
@@ -63,10 +79,11 @@ def issue_otp(db: Session, user: User, purpose: str, background_tasks: Optional[
     db.add(otp)
     db.commit()
 
+    to_email = _recipient(user, purpose)
     if background_tasks is not None:
-        background_tasks.add_task(send_otp_email, to_email=user.email, name=user.name, code=code)
+        background_tasks.add_task(send_otp_email, to_email=to_email, name=user.name, code=code)
     else:
-        send_otp_email(to_email=user.email, name=user.name, code=code)
+        send_otp_email(to_email=to_email, name=user.name, code=code)
 
 
 def verify_otp(db: Session, user_id: int, code: str, purpose: str) -> None:

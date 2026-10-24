@@ -282,11 +282,90 @@ def test_get_me_rejects_garbage_token(client):
     assert res.status_code == 401
 
 
-def test_update_me_rejects_email_already_used_by_another_account(client, signup):
+def test_email_change_rejects_email_already_used_by_another_account(client, signup):
     signup(email="ivan@example.com", phone="9876543210")
     token, _ = signup(email="judy@example.com", phone="9876543211")
-    res = client.patch("/api/auth/me", json={"email": "ivan@example.com"}, headers={"Authorization": f"Bearer {token}"})
+    res = client.post("/api/auth/me/email", json={"new_email": "ivan@example.com"}, headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 409
+
+
+def test_patch_me_refuses_to_change_email_without_verification(client, signup):
+    token, _ = signup(email="kate@example.com", phone="9876543210")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.patch("/api/auth/me", json={"email": "attacker@example.com"}, headers=headers)
+    assert res.status_code == 400
+    assert client.get("/api/auth/me", headers=headers).json()["email"] == "kate@example.com"
+
+    # Re-sending the unchanged address (what the profile screen does) still works.
+    res = client.patch("/api/auth/me", json={"name": "Kate B", "email": "KATE@example.com"}, headers=headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["name"] == "Kate B"
+
+
+def test_email_change_round_trip_switches_address_and_ends_other_sessions(client, signup, captured_otp):
+    old_token, _ = signup(email="liam@example.com", phone="9876543210")
+    headers = {"Authorization": f"Bearer {old_token}"}
+    second_session = client.post("/api/auth/refresh", headers=headers).json()["access_token"]
+
+    start = client.post("/api/auth/me/email", json={"new_email": "Liam.New@example.com"}, headers=headers)
+    assert start.status_code == 200, start.text
+    assert start.json()["email_hint"] == "li******@example.com"
+    assert captured_otp["to"] == "liam.new@example.com"  # code goes to the NEW address
+
+    done = client.post("/api/auth/me/email/verify", json={
+        "pending_token": start.json()["pending_token"], "code": captured_otp["code"]
+    }, headers=headers)
+    assert done.status_code == 200, done.text
+    assert done.json()["user"]["email"] == "liam.new@example.com"
+
+    fresh = {"Authorization": f"Bearer {done.json()['access_token']}"}
+    assert client.get("/api/auth/me", headers=fresh).status_code == 200
+    for stale in (old_token, second_session):
+        assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {stale}"}).status_code == 401
+
+
+def test_email_change_code_cannot_confirm_a_different_address(client, signup, captured_otp, monkeypatch):
+    """Codes are bound to the address they were sent to: request X, then Y,
+    and Y's code (which the user received) must not confirm X's token."""
+    monkeypatch.setattr("app.services.otp_service.OTP_RESEND_COOLDOWN_SECONDS", 0)
+    token, _ = signup(email="mia@example.com", phone="9876543210")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    for_x = client.post("/api/auth/me/email", json={"new_email": "x@example.com"}, headers=headers).json()
+    client.post("/api/auth/me/email", json={"new_email": "y@example.com"}, headers=headers)
+    code_for_y = captured_otp["code"]
+
+    res = client.post("/api/auth/me/email/verify", json={
+        "pending_token": for_x["pending_token"], "code": code_for_y
+    }, headers=headers)
+    assert res.status_code == 400
+    assert client.get("/api/auth/me", headers=headers).json()["email"] == "mia@example.com"
+
+
+def test_email_change_token_is_bound_to_the_requesting_user_and_purpose(client, signup, captured_otp):
+    token_a, _ = signup(email="noah@example.com", phone="9876543210")
+    token_b, _ = signup(email="olga@example.com", phone="9876543211")
+    start = client.post("/api/auth/me/email", json={"new_email": "noah2@example.com"},
+                        headers={"Authorization": f"Bearer {token_a}"}).json()
+
+    # Another account can't redeem it...
+    res = client.post("/api/auth/me/email/verify", json={"pending_token": start["pending_token"], "code": captured_otp["code"]},
+                      headers={"Authorization": f"Bearer {token_b}"})
+    assert res.status_code == 400
+    # ...and it isn't a login token either.
+    res = client.post("/api/auth/verify-otp", json={"pending_token": start["pending_token"], "code": captured_otp["code"]})
+    assert res.status_code == 401
+
+
+def test_email_change_resend_goes_to_the_new_address(client, signup, captured_otp, monkeypatch):
+    monkeypatch.setattr("app.services.otp_service.OTP_RESEND_COOLDOWN_SECONDS", 0)
+    token, _ = signup(email="pia@example.com", phone="9876543210")
+    start = client.post("/api/auth/me/email", json={"new_email": "pia2@example.com"},
+                        headers={"Authorization": f"Bearer {token}"}).json()
+    captured_otp.clear()
+    assert client.post("/api/auth/resend-otp", json={"pending_token": start["pending_token"]}).status_code == 200
+    assert captured_otp["to"] == "pia2@example.com"
 
 
 def test_update_me_changes_name(client, signup):

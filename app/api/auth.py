@@ -6,7 +6,7 @@ from app.config.database import get_db
 from app.schemas.user import UserCreate, UserResponse
 from app.services.user_service import UserService, DuplicateUserError, normalize_phone
 from app.services.gmail_service import GmailService
-from app.services.otp_service import issue_otp, verify_otp as verify_otp_code, OtpError
+from app.services.otp_service import issue_otp, verify_otp as verify_otp_code, OtpError, email_change_purpose, EMAIL_CHANGE_PURPOSE_PREFIX
 from app.utils.auth import (
     create_user_access_token,
     create_pending_token,
@@ -25,6 +25,7 @@ from app.models.category import Category
 from app.models.otp_code import OtpCode
 from app.utils.crypto import decrypt
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from sqlalchemy.exc import IntegrityError
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 gmail_service = GmailService()
@@ -138,6 +139,13 @@ class UpdateProfileRequest(BaseModel):
         if len(digits) != 10:
             raise ValueError("Phone number must be 10 digits")
         return digits
+
+class EmailChangeRequest(BaseModel):
+    new_email: EmailStr
+
+class EmailChangeVerifyRequest(BaseModel):
+    pending_token: str
+    code: str
 
 @router.post("/signup", response_model=LoginPendingResponse)
 @limiter.limit("10/minute")
@@ -372,11 +380,16 @@ def update_current_user(
     updates = request.model_dump(exclude_unset=True, exclude_none=True)
 
     if "email" in updates:
-        email = updates["email"].lower()
-        existing = UserService.get_user_by_email(db, email)
-        if existing and existing.id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
-        updates["email"] = email
+        # Email is where login codes and password resets go — swapping it
+        # with nothing but a (possibly stolen) session would turn that
+        # session into a permanent takeover via forgot-password. A changed
+        # address goes through POST /me/email instead; resending the
+        # current one is accepted as a no-op so profile saves still work.
+        if updates.pop("email").lower() != current_user.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Changing your email needs verification — use POST /api/auth/me/email"
+            )
 
     if "phone" in updates:
         existing = UserService.get_user_by_phone(db, updates["phone"])
@@ -389,6 +402,83 @@ def update_current_user(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+def _ensure_email_available(db: Session, email: str, current_user: User) -> None:
+    existing = UserService.get_user_by_email(db, email)
+    if existing and existing.id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
+
+
+@router.post("/me/email", response_model=LoginPendingResponse)
+@limiter.limit("10/minute")
+def request_email_change(
+    request: Request,
+    body: EmailChangeRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Step 1 of an email change: email a code to the *new* address. The
+    account's email only changes once that code comes back (step 2), so a
+    session alone can't redirect where login codes and resets go."""
+    new_email = body.new_email.lower()
+    if new_email == current_user.email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That's already your email address")
+    _ensure_email_available(db, new_email, current_user)
+
+    purpose = email_change_purpose(new_email)
+    try:
+        issue_otp(db, current_user, purpose=purpose, background_tasks=background_tasks)
+    except OtpError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+
+    return {
+        "pending_token": create_pending_token(current_user.id, purpose=purpose),
+        "email_hint": _mask_email(new_email)
+    }
+
+
+@router.post("/me/email/verify", response_model=LoginResponse)
+@limiter.limit("10/minute")
+def verify_email_change(
+    request: Request,
+    body: EmailChangeVerifyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Step 2: confirm the code sent to the new address, switch to it, and
+    end every other session (the change may be in response to a
+    compromise). Returns a fresh token so this device stays signed in."""
+    payload = decode_pending_token(body.pending_token)
+    purpose = (payload or {}).get("purpose") or ""
+    if not payload or payload["sub"] != current_user.id or not purpose.startswith(EMAIL_CHANGE_PURPOSE_PREFIX):
+        # 400, not 401: the caller's session is fine — only this change
+        # request is stale — and clients treat 401 as "log the user out".
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This email change request has expired. Please start again."
+        )
+
+    try:
+        verify_otp_code(db, current_user.id, body.code, purpose=purpose)
+    except OtpError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+
+    new_email = purpose[len(EMAIL_CHANGE_PURPOSE_PREFIX):]
+    # Re-checked: the address may have been taken since step 1.
+    _ensure_email_available(db, new_email, current_user)
+    current_user.email = new_email
+    current_user.email_verified = True
+    current_user.token_version += 1
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
+    db.refresh(current_user)
+
+    return {"access_token": create_user_access_token(current_user), "user": current_user}
+
 
 @router.delete("/me")
 def delete_current_user(
