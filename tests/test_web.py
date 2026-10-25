@@ -41,3 +41,11 @@ def test_dot_dot_cannot_escape_the_build(web_client):
     client, _ = web_client
     assert "SECRET" not in client.get("/..%2Fsecret.txt").text
     assert "SECRET" not in client.get("/%2E%2E/secret").text
+
+
+def test_html_is_never_served_from_a_stale_cache(web_client):
+    """After a deploy, a normal refresh must pick up the new index.html (and
+    with it the new hashed bundle) instead of a heuristically cached copy."""
+    client, _ = web_client
+    for path in ("/", "/about", "/no-such-route"):
+        assert client.get(path).headers["cache-control"] == "no-cache"

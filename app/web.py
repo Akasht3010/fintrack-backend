@@ -16,6 +16,17 @@ INDEX = os.path.join(WEB_DIR, "index.html")
 # Paths the API owns — the catch-all must not answer these with index.html.
 _API_PREFIXES = ("api/", "docs", "redoc", "openapi.json", "health")
 
+# HTML must be revalidated on every load: it's the one unhashed file that
+# points at the current (hashed) JS bundle. Without an explicit header,
+# browsers heuristically cached it and kept showing the previous release
+# after a deploy until a hard refresh. The ETag makes revalidation cheap.
+_HTML_HEADERS = {"Cache-Control": "no-cache"}
+
+
+def _file(path: str) -> FileResponse:
+    headers = _HTML_HEADERS if path.endswith(".html") else None
+    return FileResponse(path, headers=headers)
+
 
 def mount_web(app: FastAPI) -> None:
     if not os.path.isfile(INDEX):
@@ -43,6 +54,6 @@ def mount_web(app: FastAPI) -> None:
             for candidate in (path, path + ".html", os.path.join(path, "index.html")):
                 resolved = os.path.realpath(os.path.join(web_root, candidate))
                 if os.path.commonpath([resolved, web_root]) == web_root and os.path.isfile(resolved):
-                    return FileResponse(resolved)
+                    return _file(resolved)
 
-        return FileResponse(INDEX)
+        return _file(INDEX)
