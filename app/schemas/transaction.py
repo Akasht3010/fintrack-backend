@@ -5,7 +5,7 @@ from typing import Optional, Literal
 from app.schemas.money import Money
 
 TransactionType = Literal["debit", "credit"]
-TransactionSource = Literal["gmail", "manual", "sms", "aa"]
+TransactionSource = Literal["gmail", "manual", "sms", "aa", "statement"]
 # How the money moved. Imports get it from the alert text; "other" is an
 # import whose alert didn't say.
 PaymentMethod = Literal["upi", "card", "netbanking", "atm", "autopay", "cash", "other"]

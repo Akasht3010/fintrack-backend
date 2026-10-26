@@ -51,8 +51,9 @@ class AccountResponse(BaseModel):
     last4: Optional[str] = None
     card_last4: Optional[str] = None
     # Where the balance comes from: "alert" (the bank's last "Avl Bal"),
-    # "manual" (typed in by the user), or null (opening balance + transactions).
-    balance_source: Optional[Literal["alert", "manual"]] = None
+    # "manual" (typed in by the user), "statement" (an imported statement's
+    # closing balance), or null (opening balance + transactions).
+    balance_source: Optional[Literal["alert", "manual", "statement"]] = None
     balance_as_of: Optional[datetime] = None
     # False until the bank (an alert) or the user has supplied a real figure.
     balance_known: bool = True

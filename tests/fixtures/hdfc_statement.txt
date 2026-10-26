@@ -1,0 +1,16 @@
+
+                                                                                         HDFC BANK Ltd.          Page No .:     1           Statement of accounts
+  MR AKASH DEMO                                                                          Account Branch :MUMBAI
+  Account No :50100123451234   PRIME POTENTIAL                                           
+  Statement From  :01/10/26     To :31/10/26
+
+ Date     ,Narration                                                                                                                ,Value Dat,Debit Amount       ,Credit Amount      ,Chq/Ref Number   ,Closing Balance
+ 01/10/26  ,NEFT CR-ICIC0000001-ACME TECHNOLOGIES PVT LTD-SALARY OCT 2026-ICICN52026100100123                                       ,01/10/26 ,           0.00,       85000.00,ICICN52026100100123,      120000.00
+ 02/10/26  ,UPI-SWIGGY-SWIGGY@ICICI-ICIC0DC0099-427512345678-PAYMENT FROM PHONE                                                    ,02/10/26 ,         649.00,           0.00,0000427512345678 ,      119351.00
+ 02/10/26  ,UPI-CHAI POINT-CHAIPOINT@YBL-YESB0YBLUPI-427512345679-UPI                                                              ,02/10/26 ,          20.00,           0.00,0000427512345679 ,      119331.00
+ 02/10/26  ,UPI-CHAI POINT-CHAIPOINT@YBL-YESB0YBLUPI-427512345680-UPI                                                              ,02/10/26 ,          20.00,           0.00,0000427512345680 ,      119311.00
+ 05/10/26  ,POS 416021XXXXXX4455 AMAZON PAY INDIA                                                                                  ,05/10/26 ,        1499.00,           0.00,0000627812345678 ,      117812.00
+ 06/10/26  ,ATW-416021XXXXXX4455-S1ACNM04-MUMBAI                                                                                   ,06/10/26 ,        2000.00,           0.00,0000000000006123 ,      115812.00
+ 07/10/26  ,ACH D- TP ACH ICICIPRULIFE-1234567890                                                                                  ,07/10/26 ,        2500.00,           0.00,0000000000001234 ,      113312.00
+ 10/10/26  ,CC 000416021XXXXXX9876 AUTOPAY SI-TAD                                                                                  ,10/10/26 ,       15000.00,           0.00,0000000000009876 ,       98312.00
+ 15/10/26  ,UPI-RAHUL KUMAR-RAHUL@OKHDFCBANK-HDFC0001234-528912345678-DINNER SPLIT                                                 ,15/10/26 ,           0.00,         206.00,0000528912345678 ,       98518.00

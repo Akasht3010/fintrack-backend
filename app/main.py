@@ -8,7 +8,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.config.database import Base, engine
 from app.config.init_db import migrate_schema, seed_default_categories, encrypt_plaintext_gmail_tokens
 from app.utils.rate_limit import limiter
-from app.api import auth, transactions, budgets, google_auth, gmail, insights, recurring, categories, accounts, sms, admin
+from app.api import auth, transactions, budgets, google_auth, gmail, insights, recurring, categories, accounts, sms, admin, statements
 from app.web import mount_web
 
 @asynccontextmanager
@@ -73,6 +73,7 @@ app.include_router(categories.router)
 app.include_router(accounts.router)
 app.include_router(sms.router)
 app.include_router(admin.router)
+app.include_router(statements.router)
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():

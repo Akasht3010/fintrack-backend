@@ -4,6 +4,7 @@ from typing import Optional, Sequence
 
 from sqlalchemy.orm import Session
 
+from app.models.account import Account
 from app.models.transaction import Transaction
 from app.services.account_service import AccountMatcher, apply_reported_balance
 from app.services.email_parser import ParsedEmailTransaction
@@ -71,7 +72,29 @@ class ImportDeduper:
             Transaction.date >= when - DEDUP_WINDOW,
             Transaction.date <= when + DEDUP_WINDOW,
         ).all()
-        return any(self._same_payment(reference, hints_set, ref, _hints(h)) for ref, h in nearby)
+        if any(self._same_payment(reference, hints_set, ref, _hints(h)) for ref, h in nearby):
+            return True
+
+        # Rows imported from a bank statement carry the day but not the time,
+        # so an alert for the same payment synced afterwards is matched by day.
+        day_start = datetime.combine(when.date(), datetime.min.time())
+        from_statement = (
+            self.db.query(Transaction.reference, Account.last4, Account.card_last4)
+            .join(Account, Account.id == Transaction.account_id)
+            .filter(
+                Transaction.user_id == self.user_id,
+                Transaction.source == "statement",
+                Transaction.amount == amount,
+                Transaction.type == type,
+                Transaction.date >= day_start,
+                Transaction.date < day_start + timedelta(days=1),
+            )
+            .all()
+        )
+        return any(
+            self._same_payment(reference, hints_set, ref, {d for d in (last4, card_last4) if d})
+            for ref, last4, card_last4 in from_statement
+        )
 
     def record(
         self, amount: Decimal, type: str, when: datetime,

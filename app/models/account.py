@@ -30,7 +30,7 @@ class Account(Base):
     # import before the anchor can no longer skew it.
     reported_balance = Column(Numeric(12, 2), nullable=True)
     reported_balance_at = Column(DateTime, nullable=True)
-    reported_balance_source = Column(String, nullable=True)  # alert | manual
+    reported_balance_source = Column(String, nullable=True)  # alert | manual | statement
     is_archived = Column(Boolean, default=False)
     created_at = Column(DateTime, default=now_ist)
     updated_at = Column(DateTime, default=now_ist, onupdate=now_ist)

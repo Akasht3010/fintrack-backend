@@ -21,6 +21,8 @@ slowapi>=0.1.9
 # Bundles the IANA tz database so zoneinfo.ZoneInfo("Asia/Kolkata") resolves
 # reliably regardless of whether the deploy host's OS has tzdata installed.
 tzdata>=2024.1
+# Reads HDFC's Excel statement download (legacy .xls).
+xlrd==2.0.1
 
 # Testing
 pytest>=8.0.0
