@@ -1,4 +1,5 @@
 import hashlib
+import re
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -31,6 +32,10 @@ def _marker(account: Account, row: StatementRow) -> str:
     # same marker — the (user_id, raw_text) unique index makes it idempotent.
     key = f"{row.date.isoformat()}|{row.narration}|{row.debit}|{row.credit}|{row.closing_balance}"
     return f"stmt:{account.id}:{hashlib.sha1(key.encode()).hexdigest()[:20]}"
+
+
+def _poor_merchant(name: str) -> bool:
+    return not re.search(r"[A-Za-z]{2,}", name or "") or name in ("Bank transaction", "UPI payment")
 
 
 def _same_ref(a: Optional[str], b: Optional[str]) -> bool:
@@ -119,6 +124,12 @@ def import_statement(db: Session, user_id: int, account: Account, statement: Par
                 match.reference = reference
             if not match.payment_method:
                 match.payment_method = details.payment_method
+            # The alert's payee was unreadable (a helpline number, a terminal
+            # id, the generic fallback) — the statement names it properly.
+            if _poor_merchant(match.merchant) and not _poor_merchant(details.merchant):
+                match.merchant = details.merchant[:100]
+                if match.category == "other":
+                    match.category = details.category or categorize_merchant(details.merchant, row.narration)
             continue
 
         category = details.category or categorize_merchant(details.merchant, row.narration)

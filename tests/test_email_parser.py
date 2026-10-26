@@ -188,3 +188,36 @@ def test_estatement_email_with_a_balance_figure_is_not_recorded():
         sender="ICICI Bank <estatement@icicibank.com>",
     )
     assert result is None
+
+
+def test_hdfc_upi_email_names_the_payee_after_the_vpa_not_the_helpline():
+    result = parse_bank_email(
+        subject="You have done a UPI txn. Check details!",
+        body=(
+            "Dear Customer, Rs.279.00 has been debited from account 5115 to VPA paytmqr5abc@ptys "
+            "MOHAMMAD SHAFIQUE SI on 25-10-26. Your UPI transaction reference number is 131863519169. "
+            "If you did not authorize this transaction, please report it immediately by calling "
+            "18002586161 Or SMS BLOCK UPI to 7308080808."
+        ),
+        snippet="", sender="HDFC Bank InstaAlerts <alerts@hdfcbank.bank.in>",
+    )
+    assert result["merchant"] == "MOHAMMAD SHAFIQUE SI"
+    assert result["reference"] == "131863519169"
+
+
+def test_emandate_advance_notice_is_not_a_transaction():
+    assert parse_bank_email(
+        subject="Upcoming E-mandate debit",
+        body="Rs.89.00 will be debited from your account 5115 on 28-10-26 for the E-mandate set up for "
+             "GOOGLE PLAY. To manage your E-mandates visit NetBanking.",
+        snippet="", sender="",
+    ) is None
+
+
+def test_a_terminal_id_is_never_the_payee():
+    result = parse_bank_email(
+        subject="", sender="", snippet="",
+        body="Txn Rs.2399.00\nOn HDFC Bank Card 8691\nAt 627711073250\nby UPI 629711073250\nOn 24-10\n"
+             "Not You?\nCall 18002586161/SMS BLOCK DC 8691 to 7308080808",
+    )
+    assert result["merchant"] == "Bank transaction"

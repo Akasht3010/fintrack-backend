@@ -178,3 +178,24 @@ def test_bad_file_is_a_422_not_a_500(client, auth_headers):
     acct = _bank(client, headers)
     res = _upload(client, headers, acct["id"], content=b"%PDF-1.4 binary", name="s.pdf")
     assert res.status_code == 422
+
+
+def test_statement_renames_alerts_with_unreadable_payees(client, auth_headers):
+    headers, _ = auth_headers
+    acct = _bank(client, headers)
+    # Imported before the parser fix: payee came out as HDFC's helpline number.
+    from app.config.database import SessionLocal
+    from app.models.transaction import Transaction
+    db = SessionLocal()
+    db.add(Transaction(
+        user_id=acct and 1, account_id=acct["id"], amount=Decimal("649.00"), type="debit", category="other",
+        merchant="7308080808", description="x", date=datetime(2026, 10, 2, 13, 5), source="gmail",
+        raw_text="gmail:old1", payment_method="upi", reference="427512345678",
+    ))
+    db.commit()
+    db.close()
+
+    body = _upload(client, headers, acct["id"]).json()
+    assert body["matched"] == 1
+    txn = client.get(f"/api/transactions?account_id={acct['id']}&q=swiggy", headers=headers).json()["transactions"]
+    assert [(t["merchant"], t["source"], t["category"]) for t in txn] == [("Swiggy", "gmail", "food")]
