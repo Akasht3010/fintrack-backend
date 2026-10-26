@@ -54,6 +54,10 @@ class AccountResponse(BaseModel):
     # "manual" (typed in by the user), or null (opening balance + transactions).
     balance_source: Optional[Literal["alert", "manual"]] = None
     balance_as_of: Optional[datetime] = None
+    # False until the bank (an alert) or the user has supplied a real figure.
+    balance_known: bool = True
+    # Newest bank alert matched to this account — it's "verified" once set.
+    last_alert_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

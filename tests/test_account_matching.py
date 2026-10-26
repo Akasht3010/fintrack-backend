@@ -237,3 +237,19 @@ def test_merchant_stops_before_the_reference_number():
 
 def test_atm_withdrawal_is_named_as_such():
     assert _parse("Rs.2000.00 withdrawn at ATM from A/c XX1234. Avl Bal Rs 100.00")["merchant"] == "ATM withdrawal"
+
+
+def test_new_account_balance_is_unknown_until_an_alert_or_the_user_sets_it(client, auth_headers):
+    headers, _ = auth_headers
+    acct = _account(client, headers, last4="1234")
+    assert acct["balance_known"] is False
+    assert acct["last_alert_at"] is None
+    assert client.get("/api/accounts/net-worth", headers=headers).json()["accounts"] == []
+
+    client.post("/api/sms/sync", json={"messages": [
+        _sms("Rs.20.00 debited from A/c XX1234 UPI Ref 500000000061. Avl Bal Rs 500.00", 0),
+    ]}, headers=headers)
+    listed = _accounts(client, headers)[acct["id"]]
+    assert listed["balance_known"] is True
+    assert listed["last_alert_at"] is not None
+    assert Decimal(client.get("/api/accounts/net-worth", headers=headers).json()["net_worth"]) == Decimal("500.00")

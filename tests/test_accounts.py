@@ -87,7 +87,7 @@ def test_net_worth_subtracts_credit_card_balance_from_bank_balance(client, auth_
         "name": "Bank", "type": "bank", "currency": "INR", "opening_balance": 10000
     }, headers=headers).json()
     card = client.post("/api/accounts", json={
-        "name": "Card", "type": "credit_card", "currency": "INR", "opening_balance": 0
+        "name": "Card", "type": "credit_card", "currency": "INR", "opening_balance": 500
     }, headers=headers).json()
     client.post("/api/transactions", json={
         "amount": 3000.0, "currency": "INR", "type": "debit", "category": "shopping",
@@ -99,8 +99,8 @@ def test_net_worth_subtracts_credit_card_balance_from_bank_balance(client, auth_
     assert res.status_code == 200
     body = res.json()
     assert Decimal(body["total_assets"]) == Decimal("10000")
-    assert Decimal(body["total_liabilities"]) == Decimal("3000")
-    assert Decimal(body["net_worth"]) == Decimal("7000")
+    assert Decimal(body["total_liabilities"]) == Decimal("3500")
+    assert Decimal(body["net_worth"]) == Decimal("6500")
 
 
 def test_archived_accounts_are_excluded_from_the_default_list(client, auth_headers):

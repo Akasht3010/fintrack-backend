@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.models.user import User
 from app.schemas.account import AccountBalanceUpdate, AccountCreate, AccountResponse, AccountUpdate, NetWorthSummary
-from app.services.account_service import AccountInUseError, AccountService, compute_balances
+from app.services.account_service import AccountInUseError, AccountService, compute_balances, last_alert_dates
 from app.utils.auth import get_current_user
 from app.utils.timezone import now_ist, to_ist_naive
 
@@ -19,7 +19,11 @@ def list_accounts(
     """List the authenticated user's accounts (active only, unless include_archived=true), with live balances."""
     accounts = AccountService.list_visible(db, current_user.id, include_archived)
     balances = compute_balances(db, accounts)
-    return [AccountService.to_response(db, a, balances[a.id]) for a in accounts]
+    alerts = last_alert_dates(db, accounts)
+    return [
+        AccountService.to_response(db, a, balances[a.id], last_alert_at=alerts[a.id], check_alerts=False)
+        for a in accounts
+    ]
 
 @router.get("/net-worth", response_model=NetWorthSummary)
 def get_net_worth(
@@ -35,7 +39,8 @@ def create_account(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create an account with a starting balance (0 if you're tracking from here on)."""
+    """Create an account. Its balance comes from the bank's alerts (or POST
+    /{id}/balance); opening_balance is still accepted for old clients."""
     account = AccountService.create(
         db, current_user.id, payload.name, payload.type, payload.currency, payload.opening_balance,
         institution=payload.institution, last4=payload.last4, card_last4=payload.card_last4

@@ -71,6 +71,30 @@ def compute_balance(db: Session, account: Account) -> Decimal:
     return compute_balances(db, [account])[account.id]
 
 
+def balance_known(account: Account) -> bool:
+    """Whether there's a real figure behind the balance: the bank's (an
+    alert's "Avl Bal" or one the user entered), or — for accounts from
+    before opening balances were dropped — a non-zero opening balance.
+    Otherwise the "balance" is only the sum of imported transactions,
+    which says nothing about what's actually in the account."""
+    return account.reported_balance is not None or account.opening_balance != 0
+
+
+def last_alert_dates(db: Session, accounts: list[Account]) -> dict[int, Optional[datetime]]:
+    """Newest imported (bank-alert) transaction per account — proof the
+    account is real and its digits match what the bank prints."""
+    if not accounts:
+        return {}
+    rows = (
+        db.query(Transaction.account_id, func.max(Transaction.date))
+        .filter(Transaction.account_id.in_([a.id for a in accounts]), Transaction.source != "manual")
+        .group_by(Transaction.account_id)
+        .all()
+    )
+    found = dict(rows)
+    return {a.id: found.get(a.id) for a in accounts}
+
+
 def _digits(account: Account) -> list[str]:
     return [d for d in (account.last4, account.card_last4) if d]
 
@@ -225,7 +249,12 @@ class AccountService:
         db.commit()
 
     @staticmethod
-    def to_response(db: Session, account: Account, balance: Decimal | None = None) -> dict:
+    def to_response(
+        db: Session, account: Account, balance: Decimal | None = None,
+        last_alert_at: datetime | None = None, check_alerts: bool = True
+    ) -> dict:
+        if check_alerts and last_alert_at is None:
+            last_alert_at = last_alert_dates(db, [account])[account.id]
         return {
             "id": account.id,
             "name": account.name,
@@ -238,14 +267,18 @@ class AccountService:
             "card_last4": account.card_last4,
             "balance_source": account.reported_balance_source,
             "balance_as_of": account.reported_balance_at,
+            "balance_known": balance_known(account),
+            "last_alert_at": last_alert_at,
             "is_archived": account.is_archived,
             "created_at": account.created_at
         }
 
     @staticmethod
     def net_worth(db: Session, user_id: int) -> dict:
-        """Asset balances minus liability balances (all INR)."""
-        accounts = AccountService.list_visible(db, user_id)
+        """Asset balances minus liability balances (all INR). Accounts with
+        no known balance yet are left out rather than counted as their sum
+        of transactions."""
+        accounts = [a for a in AccountService.list_visible(db, user_id) if balance_known(a)]
         balances = compute_balances(db, accounts)
 
         total_assets = Decimal("0")
