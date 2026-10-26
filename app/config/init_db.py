@@ -131,6 +131,31 @@ def migrate_schema():
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE transactions ADD COLUMN idempotency_key VARCHAR"))
 
+    # Account matching / reconciliation details read from bank alerts.
+    for name, ddl in (
+        ("payment_method", "VARCHAR"),
+        ("account_hint", "VARCHAR"),
+        ("reference", "VARCHAR"),
+        ("balance_after", "NUMERIC(12,2)"),
+    ):
+        if name not in columns:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE transactions ADD COLUMN {name} {ddl}"))
+
+    if "accounts" in inspector.get_table_names():
+        account_columns = {col["name"] for col in inspector.get_columns("accounts")}
+        for name, ddl in (
+            ("institution", "VARCHAR"),
+            ("last4", "VARCHAR"),
+            ("card_last4", "VARCHAR"),
+            ("reported_balance", "NUMERIC(12,2)"),
+            ("reported_balance_at", "TIMESTAMP"),
+            ("reported_balance_source", "VARCHAR"),
+        ):
+            if name not in account_columns:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {name} {ddl}"))
+
     existing_transaction_index_names = {idx["name"] for idx in inspector.get_indexes("transactions")}
     if "uq_transactions_user_idempotency_key" not in existing_transaction_index_names:
         try:

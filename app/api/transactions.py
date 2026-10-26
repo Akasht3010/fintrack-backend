@@ -56,7 +56,9 @@ def _apply_filters(
     min_amount: Optional[Decimal],
     max_amount: Optional[Decimal],
     source: Optional[str] = None,
-    type: Optional[str] = None
+    type: Optional[str] = None,
+    account_id: Optional[int] = None,
+    payment_method: Optional[str] = None
 ) -> SAQuery:
     if category and category != "all":
         query = query.filter(Transaction.category == category)
@@ -75,6 +77,11 @@ def _apply_filters(
         query = query.filter(Transaction.source == source)
     if type and type != "all":
         query = query.filter(Transaction.type == type)
+    if account_id is not None:
+        # 0 = not linked to any account
+        query = query.filter(Transaction.account_id.is_(None) if account_id == 0 else Transaction.account_id == account_id)
+    if payment_method and payment_method != "all":
+        query = query.filter(Transaction.payment_method == payment_method)
     return query
 
 @router.post("", response_model=TransactionResponse)
@@ -115,7 +122,8 @@ def create_transaction(
         # higher-trust import.
         source="manual",
         idempotency_key=transaction.idempotency_key,
-        is_recurring=transaction.is_recurring
+        is_recurring=transaction.is_recurring,
+        payment_method=transaction.payment_method
     )
     db.add(db_transaction)
     try:
@@ -144,12 +152,17 @@ def list_transactions(
     date_to: Optional[datetime] = Query(None),
     min_amount: Optional[Decimal] = Query(None),
     max_amount: Optional[Decimal] = Query(None),
+    account_id: Optional[int] = Query(None, ge=0, description="Account id; 0 = not linked to any account"),
+    payment_method: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get the authenticated user's transactions, paginated and optionally filtered"""
     query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
-    query = _apply_filters(query, category, q, date_from, date_to, min_amount, max_amount)
+    query = _apply_filters(
+        query, category, q, date_from, date_to, min_amount, max_amount,
+        account_id=account_id, payment_method=payment_method
+    )
 
     total = query.count()
 

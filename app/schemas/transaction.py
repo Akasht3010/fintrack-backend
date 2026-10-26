@@ -6,6 +6,9 @@ from app.schemas.money import Money
 
 TransactionType = Literal["debit", "credit"]
 TransactionSource = Literal["gmail", "manual", "sms", "aa"]
+# How the money moved. Imports get it from the alert text; "other" is an
+# import whose alert didn't say.
+PaymentMethod = Literal["upi", "card", "netbanking", "atm", "autopay", "cash", "other"]
 
 # `type` (debit/credit) already carries direction, so amount is always a
 # magnitude — zero/negative is nonsensical and would corrupt compute_balance/
@@ -32,6 +35,7 @@ class TransactionBase(BaseModel):
     source: TransactionSource
     is_recurring: bool = False
     account_id: Optional[int] = None
+    payment_method: Optional[PaymentMethod] = None
 
 class TransactionCreate(TransactionBase):
     # No raw_text: that column holds the Gmail/SMS import markers
@@ -51,8 +55,9 @@ class TransactionUpdate(BaseModel):
     category: Optional[str] = Field(default=None, min_length=1, max_length=MAX_CATEGORY_LENGTH)
     merchant: Optional[str] = Field(default=None, min_length=1, max_length=MAX_MERCHANT_LENGTH)
     description: Optional[str] = Field(default=None, max_length=MAX_DESCRIPTION_LENGTH)
-    # The one field that may be explicitly cleared (unlink from an account).
+    # May be explicitly cleared (unlink from an account / unknown method).
     account_id: Optional[int] = None
+    payment_method: Optional[PaymentMethod] = None
 
     @model_validator(mode="after")
     def reject_null_for_required_columns(self):
@@ -70,6 +75,9 @@ class TransactionResponse(TransactionBase):
     id: int
     user_id: int
     created_at: datetime
+    # Trailing account/card digits the bank alert quoted (comma-separated),
+    # so the app can offer to link an import no account claimed.
+    account_hint: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -20,6 +20,12 @@ class Transaction(Base):
     date = Column(DateTime, nullable=False, index=True)
     source = Column(String, nullable=False)  # gmail, manual, sms, aa
     raw_text = Column(String, nullable=True)
+    payment_method = Column(String, nullable=True)  # upi, card, netbanking, atm, autopay, cash, other
+    # For imports: the trailing account/card digits the alert quoted
+    # (comma-separated), kept so an account added later can still claim it.
+    account_hint = Column(String, nullable=True)
+    reference = Column(String, nullable=True)  # UPI ref / UTR / RRN
+    balance_after = Column(Numeric(12, 2), nullable=True)  # the alert's "Avl Bal"
     # Client-generated, opt-in dedup key for manual entry — raw_text already
     # plays this role for the gmail/sms import paths, but those build the
     # marker themselves server-side; a manual POST has no equivalent, so a

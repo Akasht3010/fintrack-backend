@@ -8,7 +8,8 @@ from email.utils import parsedate_to_datetime
 
 from app.config.database import get_db
 from app.services.gmail_service import GmailService
-from app.services.import_dedup import ImportDeduper
+from app.services.account_service import AccountMatcher
+from app.services.import_dedup import ImportDeduper, apply_alert_details, note_reported_balance
 from app.services.user_service import UserService
 from app.services.email_parser import parse_bank_email
 from app.services.categorizer import categorize_merchant
@@ -125,8 +126,20 @@ def sync_gmail_emails(
     if not current_user.gmail_connected or not current_user.gmail_refresh_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Gmail not connected")
 
+    # Messages already imported with full details never need downloading
+    # again; ones imported before account matching existed are re-read once
+    # to backfill it.
+    done_ids = {
+        marker.removeprefix("gmail:")
+        for (marker,) in db.query(Transaction.raw_text).filter(
+            Transaction.user_id == current_user.id,
+            Transaction.raw_text.like("gmail:%"),
+            Transaction.payment_method.isnot(None),
+        )
+    }
+
     try:
-        emails = gmail_service.search_bank_emails(decrypt(current_user.gmail_refresh_token))
+        emails = gmail_service.search_bank_emails(decrypt(current_user.gmail_refresh_token), skip_ids=done_ids)
     except Exception as e:
         # Google expires refresh tokens after 7 days for OAuth apps still in
         # "Testing" publishing status (ours is, pending verification) — this
@@ -154,18 +167,11 @@ def sync_gmail_emails(
     skipped_duplicate = 0
     skipped_unparsed = 0
     deduper = ImportDeduper(db, current_user.id)
+    matcher = AccountMatcher(db, current_user.id)
     affected_categories = set()
 
     for email in emails:
         marker = f"gmail:{email['id']}"
-
-        already_exists = db.query(Transaction).filter(
-            Transaction.user_id == current_user.id,
-            Transaction.raw_text == marker
-        ).first()
-        if already_exists:
-            skipped_duplicate += 1
-            continue
 
         parsed = parse_bank_email(
             subject=email.get("subject", ""),
@@ -173,6 +179,20 @@ def sync_gmail_emails(
             snippet=email.get("snippet", ""),
             sender=email.get("from", "")
         )
+
+        already_exists = db.query(Transaction).filter(
+            Transaction.user_id == current_user.id,
+            Transaction.raw_text == marker
+        ).first()
+        if already_exists:
+            # Imported before account matching existed — fill in the
+            # account / payment method / balance now that we have the text.
+            if already_exists.payment_method is None and parsed:
+                apply_alert_details(already_exists, parsed, matcher)
+                db.commit()
+            skipped_duplicate += 1
+            continue
+
         if not parsed:
             skipped_unparsed += 1
             continue
@@ -196,10 +216,13 @@ def sync_gmail_emails(
         except Exception:
             email_date = now_ist()
 
-        if deduper.is_duplicate(parsed["amount"], parsed["type"], email_date):
+        dedup_key = (parsed["amount"], parsed["type"], email_date, parsed["reference"], parsed["account_hints"])
+        if deduper.is_duplicate(*dedup_key):
+            note_reported_balance(parsed, email_date, matcher)
+            db.commit()
             skipped_duplicate += 1
             continue
-        deduper.record(parsed["amount"], parsed["type"], email_date)
+        deduper.record(*dedup_key)
 
         transaction = Transaction(
             user_id=current_user.id,
@@ -214,6 +237,7 @@ def sync_gmail_emails(
             raw_text=marker,
             is_recurring=False
         )
+        apply_alert_details(transaction, parsed, matcher)
         db.add(transaction)
         try:
             # Committed per-message rather than batched at the end of the

@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 
 from app.config.database import get_db
 from app.models.user import User
-from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, NetWorthSummary
+from app.schemas.account import AccountBalanceUpdate, AccountCreate, AccountResponse, AccountUpdate, NetWorthSummary
 from app.services.account_service import AccountInUseError, AccountService, compute_balances
 from app.utils.auth import get_current_user
+from app.utils.timezone import now_ist, to_ist_naive
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -36,7 +37,8 @@ def create_account(
 ):
     """Create an account with a starting balance (0 if you're tracking from here on)."""
     account = AccountService.create(
-        db, current_user.id, payload.name, payload.type, payload.currency, payload.opening_balance
+        db, current_user.id, payload.name, payload.type, payload.currency, payload.opening_balance,
+        institution=payload.institution, last4=payload.last4, card_last4=payload.card_last4
     )
     return AccountService.to_response(db, account)
 
@@ -52,7 +54,28 @@ def update_account(
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
-    updated = AccountService.update(db, account, payload.name, payload.opening_balance, payload.is_archived)
+    updated = AccountService.update(
+        db, account, payload.name, payload.opening_balance, payload.is_archived,
+        fields_set=payload.model_fields_set, institution=payload.institution,
+        last4=payload.last4, card_last4=payload.card_last4
+    )
+    return AccountService.to_response(db, updated)
+
+@router.post("/{account_id}/balance", response_model=AccountResponse)
+def set_account_balance(
+    account_id: int,
+    payload: AccountBalanceUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Reconcile: set the balance to what the bank / UPI app shows. Later
+    transactions are applied on top of it."""
+    account = AccountService.get_own(db, current_user.id, account_id)
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
+    at = to_ist_naive(payload.as_of) if payload.as_of else now_ist()
+    updated = AccountService.set_balance(db, account, payload.balance, at)
     return AccountService.to_response(db, updated)
 
 @router.delete("/{account_id}")

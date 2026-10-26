@@ -3,11 +3,22 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 import base64
 import os
-from typing import Optional
+import html as html_lib
+import re
+from typing import AbstractSet, Optional
 import httpx
 from datetime import datetime, timedelta
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+
+
+def _html_to_text(markup: str) -> str:
+    markup = re.sub(r'(?is)<(script|style)\b.*?</\1>', ' ', markup)
+    markup = re.sub(r'(?i)<br\s*/?>|</(p|div|tr|li|h\d)>', '\n', markup)
+    markup = re.sub(r'<[^>]+>', ' ', markup)
+    text = html_lib.unescape(markup)
+    text = re.sub(r'[ \t\xa0]+', ' ', text)
+    return re.sub(r'\s*\n\s*', '\n', text).strip()
 
 
 def _client_config():
@@ -58,22 +69,36 @@ class GmailService:
         )
         return build('gmail', 'v1', credentials=credentials)
 
-    def fetch_emails(self, refresh_token: str, query: str = 'is:unread', max_results: int = 10):
+    def fetch_emails(
+        self, refresh_token: str, query: str = 'is:unread', max_results: int = 10,
+        skip_ids: AbstractSet[str] = frozenset()
+    ):
         # Let HttpError propagate — a real API failure (e.g. Gmail API not
         # enabled, revoked access) must surface as an error, not look
         # identical to "no matching emails found".
         service = self.get_gmail_service(refresh_token)
-        results = service.users().messages().list(
-            userId='me',
-            q=query,
-            maxResults=max_results
-        ).execute()
 
-        messages = results.get('messages', [])
+        # Gmail pages its results (at most 500 ids a page, often far fewer);
+        # reading only the first page silently dropped everything past it.
+        ids: list[str] = []
+        page_token = None
+        while len(ids) < max_results:
+            results = service.users().messages().list(
+                userId='me',
+                q=query,
+                maxResults=min(500, max_results - len(ids)),
+                pageToken=page_token
+            ).execute()
+            ids.extend(msg['id'] for msg in results.get('messages', []))
+            page_token = results.get('nextPageToken')
+            if not page_token:
+                break
+
         emails = []
-
-        for msg in messages:
-            email = self.get_email_details(service, msg['id'])
+        for message_id in ids:
+            if message_id in skip_ids:
+                continue
+            email = self.get_email_details(service, message_id)
             if email:
                 emails.append(email)
 
@@ -107,24 +132,36 @@ class GmailService:
             return None
 
     def get_email_body(self, message: dict) -> str:
-        try:
-            if 'parts' in message['payload']:
-                parts = message['payload']['parts']
-                text = ''
-                for part in parts:
-                    if part['mimeType'] == 'text/plain':
-                        if 'data' in part['body']:
-                            text += base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
-                return text
-            else:
-                if 'data' in message['payload']['body']:
-                    return base64.urlsafe_b64decode(message['payload']['body']['data']).decode('utf-8')
-        except Exception as e:
-            print(f'Error extracting email body: {e}')
+        """Plain-text body; falls back to the HTML part with tags stripped.
+        Many bank alerts are HTML-only, and parts can nest (multipart/
+        alternative inside multipart/mixed) — reading only top-level
+        text/plain parts left the parser with nothing but the snippet."""
+        plain: list[str] = []
+        html: list[str] = []
 
+        def walk(part: dict) -> None:
+            data = part.get('body', {}).get('data')
+            mime = part.get('mimeType', '')
+            if data and mime in ('text/plain', 'text/html'):
+                try:
+                    decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='replace')
+                except Exception:
+                    decoded = ''
+                (plain if mime == 'text/plain' else html).append(decoded)
+            for child in part.get('parts', []) or []:
+                walk(child)
+
+        walk(message.get('payload', {}))
+        if plain:
+            return '\n'.join(plain)
+        if html:
+            return _html_to_text('\n'.join(html))
         return message.get('snippet', '')
 
-    def search_bank_emails(self, refresh_token: str, days: int = 30) -> list:
+    def search_bank_emails(
+        self, refresh_token: str, days: int = 30, max_results: int = 500,
+        skip_ids: AbstractSet[str] = frozenset()
+    ) -> list:
         """Search for bank transaction emails from the last N days"""
         date_limit = (datetime.now() - timedelta(days=days)).strftime('%Y/%m/%d')
 
@@ -140,8 +177,10 @@ class GmailService:
         keywords = (
             '"debited from" OR "credited to" OR "has been debited" '
             'OR "has been credited" OR "transaction alert" OR "debit alert" '
-            'OR "credit alert" OR "account alert"'
+            'OR "credit alert" OR "account alert" OR "is debited" OR "is credited" '
+            'OR "debited by" OR "debited with" OR "credited with" '
+            'OR "spent on" OR "spent using" OR "used for a transaction"'
         )
         query = f'after:{date_limit} ({keywords})'
 
-        return self.fetch_emails(refresh_token, query=query, max_results=50)
+        return self.fetch_emails(refresh_token, query=query, max_results=max_results, skip_ids=skip_ids)

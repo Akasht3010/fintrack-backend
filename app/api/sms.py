@@ -10,7 +10,8 @@ from app.schemas.sms import SmsSyncRequest, SmsSyncResponse
 from app.schemas.transaction import MAX_TRANSACTION_AMOUNT
 from app.services.email_parser import parse_bank_email
 from app.services.categorizer import categorize_merchant
-from app.services.import_dedup import ImportDeduper
+from app.services.account_service import AccountMatcher
+from app.services.import_dedup import ImportDeduper, apply_alert_details, note_reported_balance
 from app.services.budget_service import BudgetService
 from app.utils.auth import get_current_user
 from app.utils.timezone import IST
@@ -34,6 +35,7 @@ def sync_sms_messages(
     skipped_duplicate = 0
     skipped_unparsed = 0
     deduper = ImportDeduper(db, current_user.id)
+    matcher = AccountMatcher(db, current_user.id)
     affected_categories = set()
 
     for message in payload.messages:
@@ -41,15 +43,21 @@ def sync_sms_messages(
         sms_date = datetime.fromtimestamp(message.date / 1000, tz=IST).replace(tzinfo=None, microsecond=0)
         marker = f"sms:{message.address}:{message.date}"
 
+        parsed = parse_bank_email(subject="", body=body, snippet="", sender=message.address or "")
+
         already_exists = db.query(Transaction).filter(
             Transaction.user_id == current_user.id,
             Transaction.raw_text == marker
         ).first()
         if already_exists:
+            # Imported before account matching existed — fill in the
+            # account / payment method / balance now that we have the text.
+            if already_exists.payment_method is None and parsed:
+                apply_alert_details(already_exists, parsed, matcher)
+                db.commit()
             skipped_duplicate += 1
             continue
 
-        parsed = parse_bank_email(subject="", body=body, snippet="", sender=message.address or "")
         if not parsed:
             skipped_unparsed += 1
             continue
@@ -61,10 +69,13 @@ def sync_sms_messages(
             skipped_unparsed += 1
             continue
 
-        if deduper.is_duplicate(parsed["amount"], parsed["type"], sms_date):
+        dedup_key = (parsed["amount"], parsed["type"], sms_date, parsed["reference"], parsed["account_hints"])
+        if deduper.is_duplicate(*dedup_key):
+            note_reported_balance(parsed, sms_date, matcher)
+            db.commit()
             skipped_duplicate += 1
             continue
-        deduper.record(parsed["amount"], parsed["type"], sms_date)
+        deduper.record(*dedup_key)
 
         transaction = Transaction(
             user_id=current_user.id,
@@ -79,6 +90,7 @@ def sync_sms_messages(
             raw_text=marker,
             is_recurring=False
         )
+        apply_alert_details(transaction, parsed, matcher)
         db.add(transaction)
         try:
             # Committed per-message on purpose, same rationale as Gmail
